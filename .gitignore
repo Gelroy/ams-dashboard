@@ -1,6 +1,10 @@
 # OS
 .DS_Store
 
+# Local env / secrets
+.env
+.env.local
+
 # Editors
 .idea/
 .vscode/
