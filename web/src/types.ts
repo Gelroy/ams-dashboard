@@ -18,9 +18,32 @@ export interface Organization {
   jira_synced_at: string | null
 }
 
+export interface OrgUser {
+  id: string
+  organization: string
+  jira_account_id: string
+  display_name: string | null
+  email: string | null
+  role: string | null
+  alerts_enabled: boolean
+  is_primary: boolean
+}
+
 export interface Paginated<T> {
   count: number
   next: string | null
   previous: string | null
   results: T[]
 }
+
+export type EditableOrgFields = Pick<
+  Organization,
+  | 'local_name'
+  | 'ams_level'
+  | 'zabbix_status'
+  | 'help_desk_phone'
+  | 'connection_guide_url'
+  | 'notes'
+>
+
+export type EditableUserFields = Pick<OrgUser, 'role' | 'alerts_enabled' | 'is_primary'>

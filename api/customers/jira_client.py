@@ -45,6 +45,31 @@ class JiraClient:
             start += limit
         return out
 
+    def fetch_organization_users(self, jira_org_id: str) -> list[dict]:
+        """Paginated users for one org from the JSM organization users endpoint."""
+        out: list[dict] = []
+        start = 0
+        limit = 50
+        url = f"{self._base}/rest/servicedeskapi/organization/{jira_org_id}/user"
+        experimental = {"X-ExperimentalApi": "opt-in"}
+        while True:
+            r = self._client.get(url, params={"start": start, "limit": limit}, headers=experimental)
+            r.raise_for_status()
+            data = r.json()
+            values = data.get("values") or []
+            for v in values:
+                out.append(
+                    {
+                        "accountId": v.get("accountId", ""),
+                        "displayName": v.get("displayName", ""),
+                        "emailAddress": v.get("emailAddress", ""),
+                    }
+                )
+            if data.get("isLastPage") or len(values) < limit:
+                break
+            start += limit
+        return out
+
     def fetch_open_ticket_count(self, jira_org_id: str) -> int:
         jql = f"organizations = {jira_org_id} AND statusCategory != Done"
 

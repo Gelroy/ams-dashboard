@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { listOrganizations } from '../api'
 import type { AmsLevel, Organization } from '../types'
@@ -92,7 +93,9 @@ export function CustomersPage() {
               items.map((o) => (
                 <tr key={o.id}>
                   <td>
-                    <strong>{o.display_name}</strong>
+                    <Link to={`/customers/${o.id}`} className="row-link">
+                      <strong>{o.display_name}</strong>
+                    </Link>
                     {o.local_name && o.local_name !== o.jira_name && (
                       <span className="meta"> (JIRA: {o.jira_name})</span>
                     )}

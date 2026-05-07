@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { SidebarNav } from './components/SidebarNav'
+import { CustomerDetailPage } from './pages/CustomerDetailPage'
 import { CustomersPage } from './pages/CustomersPage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
 import './App.css'
@@ -15,6 +16,7 @@ function App() {
           <Route path="/critical" element={<PlaceholderPage title="Critical" />} />
           <Route path="/activities" element={<PlaceholderPage title="Activities" />} />
           <Route path="/customers" element={<CustomersPage />} />
+          <Route path="/customers/:id" element={<CustomerDetailPage />} />
           <Route path="/versions" element={<PlaceholderPage title="Versions" />} />
           <Route path="/baskets" element={<PlaceholderPage title="Baskets" />} />
           <Route path="/patch-execution" element={<PlaceholderPage title="Patch Execution" />} />

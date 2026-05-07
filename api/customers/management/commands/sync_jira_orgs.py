@@ -19,10 +19,18 @@ class Command(BaseCommand):
             return
 
         with transaction.atomic():
+            seen_jira_ids: set[str] = set()
             for o in orgs:
+                seen_jira_ids.add(o["id"])
                 Organization.objects.update_or_create(
                     jira_org_id=o["id"],
                     defaults={"jira_name": o["name"], "jira_synced_at": now},
                 )
+            # Soft-delete any orgs no longer present in JIRA.
+            removed = (
+                Organization.objects.exclude(jira_org_id__in=seen_jira_ids).update(deleted_at=now)
+            )
 
-        self.stdout.write(self.style.SUCCESS(f"Upserted {len(orgs)} orgs."))
+        self.stdout.write(
+            self.style.SUCCESS(f"Upserted {len(orgs)} orgs; soft-deleted {removed} stale orgs.")
+        )

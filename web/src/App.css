@@ -179,6 +179,107 @@
   color: #b91c1c;
 }
 
+/* ── Detail page ── */
+.breadcrumbs {
+  font-size: 12px;
+  margin-bottom: 1rem;
+}
+.breadcrumbs a {
+  color: var(--color-text-secondary);
+}
+.breadcrumbs a:hover {
+  color: var(--color-text-primary);
+}
+.row-link {
+  color: var(--color-text-primary);
+}
+.row-link:hover {
+  text-decoration: underline;
+}
+.detail-section {
+  background: var(--color-bg-primary);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+.section-title {
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0 0 1rem;
+  color: var(--color-text-primary);
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 24px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field-wide {
+  grid-column: 1 / -1;
+}
+.field-label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+.field-control .input {
+  width: 100%;
+}
+.input.compact {
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.input.textarea {
+  font-family: inherit;
+  resize: vertical;
+}
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 1rem;
+}
+.btn {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--color-border-med);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+.btn:hover {
+  background: var(--color-bg-secondary);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
+  border-color: var(--color-text-primary);
+}
+.btn-primary:hover {
+  background: #000;
+}
+.saved-indicator {
+  font-size: 12px;
+  color: #047857;
+}
+.error-text {
+  font-size: 12px;
+  color: #b91c1c;
+}
+
 /* ── Errors ── */
 .error-banner {
   margin-bottom: 1rem;

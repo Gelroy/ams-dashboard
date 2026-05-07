@@ -7,6 +7,7 @@ dependencies = [
     "django>=5.1",
     "djangorestframework>=3.15",
     "django-filter>=24.3",
+    "drf-nested-routers>=0.94",
     "django-environ>=0.11",
     "psycopg[binary]>=3.2",
     "httpx>=0.28",
@@ -29,3 +30,11 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "ams_dashboard.settings"
 python_files = ["test_*.py", "tests.py"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Django project, not a distributable library — nothing to install.
+packages = []

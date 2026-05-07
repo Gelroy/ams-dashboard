@@ -78,3 +78,38 @@ class Organization(SoftDeleteModel):
     @property
     def display_name(self) -> str:
         return self.local_name or self.jira_name
+
+
+class OrgUser(SoftDeleteModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="users"
+    )
+    jira_account_id = models.TextField()
+    display_name = models.TextField(null=True, blank=True)
+    email = models.TextField(null=True, blank=True)
+    role = models.TextField(null=True, blank=True)
+    alerts_enabled = models.BooleanField(default=False)
+    is_primary = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "org_users"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "jira_account_id"],
+                condition=Q(deleted_at__isnull=True),
+                name="org_users_org_jira_account_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["organization"],
+                condition=Q(deleted_at__isnull=True),
+                name="org_users_org_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return self.display_name or self.email or self.jira_account_id
