@@ -47,3 +47,21 @@ export type EditableOrgFields = Pick<
 >
 
 export type EditableUserFields = Pick<OrgUser, 'role' | 'alerts_enabled' | 'is_primary'>
+
+export interface Environment {
+  id: string
+  organization: string
+  name: string
+  position: number
+}
+
+export interface Server {
+  id: string
+  environment: string
+  environment_name: string
+  name: string
+  notes: string | null
+  cert_expires_on: string | null
+}
+
+export type EditableServerFields = Pick<Server, 'name' | 'notes' | 'cert_expires_on'>

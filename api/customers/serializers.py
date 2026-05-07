@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Organization, OrgUser
+from .models import Environment, Organization, OrgUser, Server
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -56,3 +56,32 @@ class OrgUserSerializer(serializers.ModelSerializer):
             "display_name",
             "email",
         ]
+
+
+class EnvironmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Environment
+        fields = ["id", "organization", "name", "position"]
+        read_only_fields = ["id", "organization"]
+
+
+class ServerSerializer(serializers.ModelSerializer):
+    environment_name = serializers.CharField(source="environment.name", read_only=True)
+
+    class Meta:
+        model = Server
+        fields = [
+            "id",
+            "environment",
+            "environment_name",
+            "name",
+            "notes",
+            "cert_expires_on",
+        ]
+        read_only_fields = ["id", "environment_name"]
+
+    def validate_environment(self, value):
+        org_pk = self.context.get("organization_pk")
+        if org_pk and str(value.organization_id) != str(org_pk):
+            raise serializers.ValidationError("Environment does not belong to this organization.")
+        return value

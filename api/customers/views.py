@@ -1,10 +1,24 @@
 from django.db.models import Q
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 from django_filters import rest_framework as filters
 from rest_framework import mixins, viewsets
 
-from .models import Organization, OrgUser
-from .serializers import OrganizationSerializer, OrgUserSerializer
+from .models import Environment, Organization, OrgUser, Server
+from .serializers import (
+    EnvironmentSerializer,
+    OrganizationSerializer,
+    OrgUserSerializer,
+    ServerSerializer,
+)
+
+
+class SoftDeleteDestroyMixin:
+    """Override destroy to set deleted_at instead of hard-deleting."""
+
+    def perform_destroy(self, instance):
+        instance.deleted_at = timezone.now()
+        instance.save(update_fields=["deleted_at"])
 
 
 class OrganizationFilter(filters.FilterSet):
@@ -49,3 +63,32 @@ class OrgUserViewSet(
         if org_pk:
             qs = qs.filter(organization_id=org_pk)
         return qs
+
+
+class EnvironmentViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+    serializer_class = EnvironmentSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        return Environment.objects.filter(organization_id=self.kwargs["organization_pk"])
+
+    def perform_create(self, serializer):
+        serializer.save(organization_id=self.kwargs["organization_pk"])
+
+
+class ServerViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+    serializer_class = ServerSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        return (
+            Server.objects.filter(environment__organization_id=self.kwargs["organization_pk"])
+            .select_related("environment")
+            .order_by("environment__position", "environment__name", "name")
+        )
+
+    def get_serializer_context(self):
+        return {
+            **super().get_serializer_context(),
+            "organization_pk": self.kwargs.get("organization_pk"),
+        }

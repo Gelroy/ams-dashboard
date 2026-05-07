@@ -280,6 +280,74 @@
   color: #b91c1c;
 }
 
+/* ── Env chips + add row ── */
+.env-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.env-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: var(--color-bg-secondary);
+  border: 0.5px solid var(--color-border);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.chip-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+}
+.chip-remove:hover {
+  color: #b91c1c;
+}
+.chip-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+.env-chip-add {
+  display: inline-flex;
+  gap: 4px;
+}
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.btn-link:hover {
+  color: var(--color-text-primary);
+}
+.add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.btn-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 16px;
+  line-height: 1;
+}
+.btn-icon:hover {
+  color: #b91c1c;
+}
+
 /* ── Errors ── */
 .error-banner {
   margin-bottom: 1rem;

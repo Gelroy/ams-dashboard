@@ -1,9 +1,12 @@
 import type {
   EditableOrgFields,
+  EditableServerFields,
   EditableUserFields,
+  Environment,
   Organization,
   OrgUser,
   Paginated,
+  Server,
 } from './types'
 
 const API_BASE = '/api'
@@ -75,4 +78,57 @@ export function updateOrgUser(
     method: 'PATCH',
     body: JSON.stringify(patch),
   })
+}
+
+// Environments are non-paginated.
+export function listEnvironments(orgId: string): Promise<Environment[]> {
+  return request<Environment[]>(`/organizations/${orgId}/environments/`)
+}
+
+export function createEnvironment(orgId: string, name: string, position: number): Promise<Environment> {
+  return request<Environment>(`/organizations/${orgId}/environments/`, {
+    method: 'POST',
+    body: JSON.stringify({ name, position }),
+  })
+}
+
+export function deleteEnvironment(orgId: string, envId: string): Promise<void> {
+  return fetch(`/api/organizations/${orgId}/environments/${envId}/`, { method: 'DELETE' }).then(
+    (r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+    },
+  )
+}
+
+export function listServers(orgId: string): Promise<Server[]> {
+  return request<Server[]>(`/organizations/${orgId}/servers/`)
+}
+
+export function createServer(
+  orgId: string,
+  payload: { environment: string; name: string; cert_expires_on?: string | null; notes?: string | null },
+): Promise<Server> {
+  return request<Server>(`/organizations/${orgId}/servers/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateServer(
+  orgId: string,
+  serverId: string,
+  patch: Partial<EditableServerFields>,
+): Promise<Server> {
+  return request<Server>(`/organizations/${orgId}/servers/${serverId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deleteServer(orgId: string, serverId: string): Promise<void> {
+  return fetch(`/api/organizations/${orgId}/servers/${serverId}/`, { method: 'DELETE' }).then(
+    (r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+    },
+  )
 }

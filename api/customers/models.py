@@ -113,3 +113,62 @@ class OrgUser(SoftDeleteModel):
 
     def __str__(self):
         return self.display_name or self.email or self.jira_account_id
+
+
+DEFAULT_ENVIRONMENT_NAMES = ["DEV", "TEST", "PROD"]
+
+
+class Environment(SoftDeleteModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="environments"
+    )
+    name = models.TextField()
+    position = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "environments"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "name"],
+                condition=Q(deleted_at__isnull=True),
+                name="environments_org_name_unique",
+            ),
+        ]
+        ordering = ["position", "name"]
+
+    def __str__(self):
+        return self.name
+
+
+class Server(SoftDeleteModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    environment = models.ForeignKey(
+        Environment, on_delete=models.CASCADE, related_name="servers"
+    )
+    name = models.TextField()
+    notes = models.TextField(null=True, blank=True)
+    cert_expires_on = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "servers"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["environment", "name"],
+                condition=Q(deleted_at__isnull=True),
+                name="servers_env_name_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["cert_expires_on"],
+                condition=Q(cert_expires_on__isnull=False, deleted_at__isnull=True),
+                name="servers_cert_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name

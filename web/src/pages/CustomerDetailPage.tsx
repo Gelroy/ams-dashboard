@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { getOrganization, listOrgUsers, updateOrganization, updateOrgUser } from '../api'
+import { CustomerSystemsSection } from '../components/CustomerSystemsSection'
 import type { AmsLevel, EditableOrgFields, Organization, OrgUser, ZabbixStatus } from '../types'
 
 const AMS_LEVELS: AmsLevel[] = ['Essential', 'Enhanced', 'Expert']
@@ -54,6 +55,7 @@ export function CustomerDetailPage() {
       </div>
 
       <DetailsSection org={org} onUpdated={setOrg} />
+      <CustomerSystemsSection orgId={id} />
       <UsersSection orgId={id} users={users} onUsersChanged={setUsers} />
     </div>
   )
