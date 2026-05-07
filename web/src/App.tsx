@@ -4,6 +4,7 @@ import { SidebarNav } from './components/SidebarNav'
 import { CustomerDetailPage } from './pages/CustomerDetailPage'
 import { CustomersPage } from './pages/CustomersPage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
+import { VersionsPage } from './pages/VersionsPage'
 import './App.css'
 
 function App() {
@@ -17,7 +18,7 @@ function App() {
           <Route path="/activities" element={<PlaceholderPage title="Activities" />} />
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/customers/:id" element={<CustomerDetailPage />} />
-          <Route path="/versions" element={<PlaceholderPage title="Versions" />} />
+          <Route path="/versions" element={<VersionsPage />} />
           <Route path="/baskets" element={<PlaceholderPage title="Baskets" />} />
           <Route path="/patch-execution" element={<PlaceholderPage title="Patch Execution" />} />
           <Route path="/analytics" element={<PlaceholderPage title="Analytics" />} />

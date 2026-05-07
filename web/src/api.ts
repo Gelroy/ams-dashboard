@@ -7,6 +7,10 @@ import type {
   OrgUser,
   Paginated,
   Server,
+  Software,
+  SoftwareRelease,
+  SoftwareVersion,
+  SoftwareVersionStatus,
 } from './types'
 
 const API_BASE = '/api'
@@ -131,4 +135,97 @@ export function deleteServer(orgId: string, serverId: string): Promise<void> {
       if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
     },
   )
+}
+
+// Software catalog. /api/software/ returns the full nested tree.
+export function listSoftware(): Promise<Software[]> {
+  return request<Software[]>(`/software/`)
+}
+
+export function createSoftware(name: string): Promise<Software> {
+  return request<Software>(`/software/`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function updateSoftware(
+  id: string,
+  patch: Partial<Pick<Software, 'name' | 'description'>>,
+): Promise<Software> {
+  return request<Software>(`/software/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deleteSoftware(id: string): Promise<void> {
+  return fetch(`/api/software/${id}/`, { method: 'DELETE' }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
+}
+
+export function createVersion(
+  softwareId: string,
+  payload: { version: string; status: SoftwareVersionStatus; position: number },
+): Promise<SoftwareVersion> {
+  return request<SoftwareVersion>(`/software/${softwareId}/versions/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateVersion(
+  softwareId: string,
+  versionId: string,
+  patch: Partial<Pick<SoftwareVersion, 'version' | 'status' | 'position'>>,
+): Promise<SoftwareVersion> {
+  return request<SoftwareVersion>(`/software/${softwareId}/versions/${versionId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deleteVersion(softwareId: string, versionId: string): Promise<void> {
+  return fetch(`/api/software/${softwareId}/versions/${versionId}/`, { method: 'DELETE' }).then(
+    (r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+    },
+  )
+}
+
+export function createRelease(
+  softwareId: string,
+  versionId: string,
+  payload: { release_name: string; released_on?: string | null; position?: number },
+): Promise<SoftwareRelease> {
+  return request<SoftwareRelease>(
+    `/software/${softwareId}/versions/${versionId}/releases/`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  )
+}
+
+export function updateRelease(
+  softwareId: string,
+  versionId: string,
+  releaseId: string,
+  patch: Partial<Pick<SoftwareRelease, 'release_name' | 'released_on' | 'position'>>,
+): Promise<SoftwareRelease> {
+  return request<SoftwareRelease>(
+    `/software/${softwareId}/versions/${versionId}/releases/${releaseId}/`,
+    { method: 'PATCH', body: JSON.stringify(patch) },
+  )
+}
+
+export function deleteRelease(
+  softwareId: string,
+  versionId: string,
+  releaseId: string,
+): Promise<void> {
+  return fetch(
+    `/api/software/${softwareId}/versions/${versionId}/releases/${releaseId}/`,
+    { method: 'DELETE' },
+  ).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
 }

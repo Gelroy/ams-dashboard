@@ -348,6 +348,53 @@
   color: #b91c1c;
 }
 
+/* ── Catalog (Software/Versions/Releases) ── */
+.catalog-card {
+  background: var(--color-bg-primary);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+.catalog-card.nested {
+  border: none;
+  border-top: 0.5px solid var(--color-border);
+  border-radius: 0;
+  margin-bottom: 0;
+}
+.catalog-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.catalog-children {
+  padding: 4px 12px 8px 36px;
+  background: var(--color-bg-secondary);
+}
+.catalog-card.nested .catalog-children {
+  padding-left: 32px;
+  background: transparent;
+}
+.chevron-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 4px;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  width: 18px;
+}
+.chevron-btn:hover {
+  color: var(--color-text-primary);
+}
+.release-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
 /* ── Errors ── */
 .error-banner {
   margin-bottom: 1rem;

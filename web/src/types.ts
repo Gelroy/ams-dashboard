@@ -65,3 +65,29 @@ export interface Server {
 }
 
 export type EditableServerFields = Pick<Server, 'name' | 'notes' | 'cert_expires_on'>
+
+export type SoftwareVersionStatus = 'Latest' | 'Supported' | 'EOL'
+
+export interface SoftwareRelease {
+  id: string
+  software_version: string
+  release_name: string
+  released_on: string | null
+  position: number
+}
+
+export interface SoftwareVersion {
+  id: string
+  software: string
+  version: string
+  status: SoftwareVersionStatus
+  position: number
+  releases: SoftwareRelease[]
+}
+
+export interface Software {
+  id: string
+  name: string
+  description: string | null
+  versions: SoftwareVersion[]
+}
