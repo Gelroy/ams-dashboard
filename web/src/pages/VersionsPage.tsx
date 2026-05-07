@@ -21,6 +21,21 @@ import type {
 
 const STATUSES: SoftwareVersionStatus[] = ['Latest', 'Supported', 'EOL']
 
+// Composing release names from a version + suffix.
+// "1.0" → prefix "1.0."     ; suffix "1" → "1.0.1"
+// "11.0.6.x" → prefix "11.0.6." (trailing wildcard stripped); suffix "13" → "11.0.6.13"
+function versionPrefix(versionLabel: string): string {
+  const stripped = versionLabel.replace(/\.[xX*]$/, '').replace(/\.+$/, '')
+  return stripped + '.'
+}
+function composeReleaseName(versionLabel: string, suffix: string): string {
+  return versionPrefix(versionLabel) + suffix.replace(/^\.+/, '').trim()
+}
+function suffixOf(versionLabel: string, releaseName: string): string {
+  const prefix = versionPrefix(versionLabel)
+  return releaseName.startsWith(prefix) ? releaseName.slice(prefix.length) : releaseName
+}
+
 export function VersionsPage() {
   const [items, setItems] = useState<Software[]>([])
   const [loading, setLoading] = useState(true)
@@ -182,6 +197,7 @@ function VersionCard({
             <ReleaseRow
               key={r.id}
               softwareId={softwareId}
+              versionLabel={version.version}
               versionId={version.id}
               release={r}
               onChanged={onChanged}
@@ -189,6 +205,7 @@ function VersionCard({
           ))}
           <AddReleaseForm
             softwareId={softwareId}
+            versionLabel={version.version}
             versionId={version.id}
             nextPosition={version.releases.length}
             onAdded={onChanged}
@@ -201,27 +218,34 @@ function VersionCard({
 
 function ReleaseRow({
   softwareId,
+  versionLabel,
   versionId,
   release,
   onChanged,
 }: {
   softwareId: string
+  versionLabel: string
   versionId: string
   release: SoftwareRelease
   onChanged: () => void
 }) {
-  const [name, setName] = useState(release.release_name)
+  const prefix = versionPrefix(versionLabel)
+  const [suffix, setSuffix] = useState(suffixOf(versionLabel, release.release_name))
 
   return (
     <div className="release-row">
+      <span className="release-prefix">{prefix}</span>
       <input
         className="input compact"
-        style={{ width: 140 }}
-        value={name}
-        onChange={(e) => setName(e.target.value)}
+        style={{ width: 90 }}
+        value={suffix}
+        onChange={(e) => setSuffix(e.target.value)}
         onBlur={() => {
-          if (name !== release.release_name)
-            updateRelease(softwareId, versionId, release.id, { release_name: name }).then(onChanged)
+          const composed = composeReleaseName(versionLabel, suffix)
+          if (composed !== release.release_name)
+            updateRelease(softwareId, versionId, release.id, { release_name: composed }).then(
+              onChanged,
+            )
         }}
       />
       <input
@@ -360,31 +384,35 @@ function AddVersionForm({
 
 function AddReleaseForm({
   softwareId,
+  versionLabel,
   versionId,
   nextPosition,
   onAdded,
 }: {
   softwareId: string
+  versionLabel: string
   versionId: string
   nextPosition: number
   onAdded: () => void
 }) {
-  const [name, setName] = useState('')
+  const prefix = versionPrefix(versionLabel)
+  const [suffix, setSuffix] = useState('')
   const [date, setDate] = useState('')
   const [status, setStatus] = useState<SoftwareVersionStatus>('Latest')
   const [busy, setBusy] = useState(false)
 
   const submit = async () => {
-    if (!name.trim()) return
+    const trimmed = suffix.trim().replace(/^\.+/, '')
+    if (!trimmed) return
     setBusy(true)
     try {
       await createRelease(softwareId, versionId, {
-        release_name: name.trim(),
+        release_name: composeReleaseName(versionLabel, trimmed),
         released_on: date || null,
         status,
         position: nextPosition,
       })
-      setName('')
+      setSuffix('')
       setDate('')
       setStatus('Latest')
       onAdded()
@@ -395,11 +423,13 @@ function AddReleaseForm({
 
   return (
     <div className="add-row">
+      <span className="release-prefix">{prefix}</span>
       <input
         className="input compact"
-        placeholder="Release (e.g. 1.0.5)"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
+        style={{ width: 90 }}
+        placeholder="suffix"
+        value={suffix}
+        onChange={(e) => setSuffix(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') submit()
         }}
@@ -421,7 +451,7 @@ function AddReleaseForm({
           </option>
         ))}
       </select>
-      <button className="btn" disabled={busy || !name.trim()} onClick={submit}>
+      <button className="btn" disabled={busy || !suffix.trim()} onClick={submit}>
         + Add Release
       </button>
     </div>

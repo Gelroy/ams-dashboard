@@ -438,6 +438,12 @@
   padding: 4px 0;
   font-size: 12px;
 }
+.release-prefix {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  user-select: none;
+}
 
 /* ── Errors ── */
 .error-banner {
