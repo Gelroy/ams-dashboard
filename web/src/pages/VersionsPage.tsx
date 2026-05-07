@@ -234,6 +234,22 @@ function ReleaseRow({
           }).then(onChanged)
         }
       />
+      <select
+        className="input compact"
+        value={release.status}
+        onChange={(e) =>
+          updateRelease(softwareId, versionId, release.id, {
+            status: e.target.value as SoftwareVersionStatus,
+          }).then(onChanged)
+        }
+      >
+        {STATUSES.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </select>
+      {release.status === 'Latest' && <span className="badge badge-latest">Latest</span>}
       <button
         className="btn-icon"
         title="Delete release"
@@ -355,6 +371,7 @@ function AddReleaseForm({
 }) {
   const [name, setName] = useState('')
   const [date, setDate] = useState('')
+  const [status, setStatus] = useState<SoftwareVersionStatus>('Latest')
   const [busy, setBusy] = useState(false)
 
   const submit = async () => {
@@ -364,10 +381,12 @@ function AddReleaseForm({
       await createRelease(softwareId, versionId, {
         release_name: name.trim(),
         released_on: date || null,
+        status,
         position: nextPosition,
       })
       setName('')
       setDate('')
+      setStatus('Latest')
       onAdded()
     } finally {
       setBusy(false)
@@ -391,6 +410,17 @@ function AddReleaseForm({
         value={date}
         onChange={(e) => setDate(e.target.value)}
       />
+      <select
+        className="input compact"
+        value={status}
+        onChange={(e) => setStatus(e.target.value as SoftwareVersionStatus)}
+      >
+        {STATUSES.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </select>
       <button className="btn" disabled={busy || !name.trim()} onClick={submit}>
         + Add Release
       </button>

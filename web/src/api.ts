@@ -197,7 +197,12 @@ export function deleteVersion(softwareId: string, versionId: string): Promise<vo
 export function createRelease(
   softwareId: string,
   versionId: string,
-  payload: { release_name: string; released_on?: string | null; position?: number },
+  payload: {
+    release_name: string
+    released_on?: string | null
+    status?: SoftwareVersionStatus
+    position?: number
+  },
 ): Promise<SoftwareRelease> {
   return request<SoftwareRelease>(
     `/software/${softwareId}/versions/${versionId}/releases/`,
@@ -209,7 +214,7 @@ export function updateRelease(
   softwareId: string,
   versionId: string,
   releaseId: string,
-  patch: Partial<Pick<SoftwareRelease, 'release_name' | 'released_on' | 'position'>>,
+  patch: Partial<Pick<SoftwareRelease, 'release_name' | 'released_on' | 'status' | 'position'>>,
 ): Promise<SoftwareRelease> {
   return request<SoftwareRelease>(
     `/software/${softwareId}/versions/${versionId}/releases/${releaseId}/`,

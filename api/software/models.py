@@ -28,7 +28,9 @@ class Software(SoftDeleteModel):
         return self.name
 
 
-class SoftwareVersionStatus(models.TextChoices):
+class LifecycleStatus(models.TextChoices):
+    """Used at both the Version and Release level."""
+
     LATEST = "Latest", "Latest"
     SUPPORTED = "Supported", "Supported"
     EOL = "EOL", "EOL"
@@ -38,7 +40,7 @@ class SoftwareVersion(SoftDeleteModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     software = models.ForeignKey(Software, on_delete=models.CASCADE, related_name="versions")
     version = models.TextField()
-    status = models.CharField(max_length=12, choices=SoftwareVersionStatus.choices)
+    status = models.CharField(max_length=12, choices=LifecycleStatus.choices)
     position = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -70,6 +72,9 @@ class SoftwareRelease(SoftDeleteModel):
     )
     release_name = models.TextField()
     released_on = models.DateField(null=True, blank=True)
+    status = models.CharField(
+        max_length=12, choices=LifecycleStatus.choices, default=LifecycleStatus.SUPPORTED
+    )
     position = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -80,6 +85,11 @@ class SoftwareRelease(SoftDeleteModel):
                 fields=["software_version", "release_name"],
                 condition=Q(deleted_at__isnull=True),
                 name="software_releases_version_name_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["software_version"],
+                condition=Q(status="Latest", deleted_at__isnull=True),
+                name="software_releases_one_latest_per_version",
             ),
         ]
         ordering = ["position", "release_name"]

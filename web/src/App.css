@@ -178,6 +178,12 @@
   border-color: #fdd9d9;
   color: #b91c1c;
 }
+.badge-latest {
+  background: #f3e8ff;
+  border-color: #e3cffe;
+  color: #6b21a8;
+  font-weight: 600;
+}
 
 /* ── Detail page ── */
 .breadcrumbs {

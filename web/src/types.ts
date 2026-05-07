@@ -66,13 +66,16 @@ export interface Server {
 
 export type EditableServerFields = Pick<Server, 'name' | 'notes' | 'cert_expires_on'>
 
-export type SoftwareVersionStatus = 'Latest' | 'Supported' | 'EOL'
+export type LifecycleStatus = 'Latest' | 'Supported' | 'EOL'
+// Back-compat alias used by existing imports.
+export type SoftwareVersionStatus = LifecycleStatus
 
 export interface SoftwareRelease {
   id: string
   software_version: string
   release_name: string
   released_on: string | null
+  status: LifecycleStatus
   position: number
 }
 
@@ -80,7 +83,7 @@ export interface SoftwareVersion {
   id: string
   software: string
   version: string
-  status: SoftwareVersionStatus
+  status: LifecycleStatus
   position: number
   releases: SoftwareRelease[]
 }
