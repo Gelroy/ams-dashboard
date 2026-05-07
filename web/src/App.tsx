@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { SidebarNav } from './components/SidebarNav'
+import { BasketsPage } from './pages/BasketsPage'
 import { CustomerDetailPage } from './pages/CustomerDetailPage'
 import { CustomersPage } from './pages/CustomersPage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
@@ -19,7 +20,7 @@ function App() {
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/customers/:id" element={<CustomerDetailPage />} />
           <Route path="/versions" element={<VersionsPage />} />
-          <Route path="/baskets" element={<PlaceholderPage title="Baskets" />} />
+          <Route path="/baskets" element={<BasketsPage />} />
           <Route path="/patch-execution" element={<PlaceholderPage title="Patch Execution" />} />
           <Route path="/analytics" element={<PlaceholderPage title="Analytics" />} />
           <Route path="/staff" element={<PlaceholderPage title="Staff" />} />

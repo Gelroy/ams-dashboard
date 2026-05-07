@@ -16,6 +16,7 @@ export interface Organization {
   ticket_count_synced_at: string | null
   last_ticket_sync_error: string | null
   jira_synced_at: string | null
+  needs_patching: NeedsPatchingStatus
 }
 
 export interface OrgUser {
@@ -62,6 +63,9 @@ export interface Server {
   name: string
   notes: string | null
   cert_expires_on: string | null
+  baskets: ServerBasketRef[]
+  installed_software: ServerInstalledSoftwareEntry[]
+  needs_patching: NeedsPatchingStatus
 }
 
 export type EditableServerFields = Pick<Server, 'name' | 'notes' | 'cert_expires_on'>
@@ -93,4 +97,39 @@ export interface Software {
   name: string
   description: string | null
   versions: SoftwareVersion[]
+}
+
+export type NeedsPatchingStatus = 'yes' | 'no' | 'unknown'
+
+export interface BasketSoftwareEntry {
+  basket: string
+  software: string
+  software_name: string
+  software_version: string
+  version_label: string
+  version_status: LifecycleStatus
+  latest_release_id: string | null
+  latest_release_name: string | null
+}
+
+export interface Basket {
+  id: string
+  name: string
+  description: string | null
+  software_entries: BasketSoftwareEntry[]
+}
+
+export interface ServerBasketRef {
+  id: string
+  name: string
+}
+
+export interface ServerInstalledSoftwareEntry {
+  id: string
+  software: string
+  software_name: string
+  software_version: string
+  version_label: string
+  software_release: string | null
+  release_name: string | null
 }

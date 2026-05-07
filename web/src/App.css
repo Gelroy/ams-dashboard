@@ -184,6 +184,44 @@
   color: #6b21a8;
   font-weight: 600;
 }
+.patch-yes {
+  background: #fef2f2;
+  border-color: #fdd9d9;
+  color: #b91c1c;
+  font-weight: 500;
+}
+.patch-no {
+  background: #ecfdf5;
+  border-color: #c8efde;
+  color: #047857;
+}
+
+/* ── Toggle-ish basket chips ── */
+.env-chip-on {
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
+  border-color: var(--color-text-primary);
+  cursor: pointer;
+}
+.env-chip-off {
+  cursor: pointer;
+  background: var(--color-bg-primary);
+}
+.env-chip-off:hover {
+  background: var(--color-bg-secondary);
+}
+
+/* ── Server detail panel inside table row ── */
+.server-detail-cell {
+  background: var(--color-bg-secondary);
+  padding: 12px 18px !important;
+}
+.server-detail .sub-section {
+  margin-bottom: 12px;
+}
+.server-detail .field-label {
+  margin-bottom: 4px;
+}
 
 /* ── Detail page ── */
 .breadcrumbs {

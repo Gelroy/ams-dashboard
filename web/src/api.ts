@@ -1,4 +1,5 @@
 import type {
+  Basket,
   EditableOrgFields,
   EditableServerFields,
   EditableUserFields,
@@ -7,6 +8,7 @@ import type {
   OrgUser,
   Paginated,
   Server,
+  ServerInstalledSoftwareEntry,
   Software,
   SoftwareRelease,
   SoftwareVersion,
@@ -231,6 +233,126 @@ export function deleteRelease(
     `/api/software/${softwareId}/versions/${versionId}/releases/${releaseId}/`,
     { method: 'DELETE' },
   ).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
+}
+
+// Baskets
+export function listBaskets(): Promise<Basket[]> {
+  return request<Basket[]>(`/baskets/`)
+}
+
+export function createBasket(name: string, description?: string): Promise<Basket> {
+  return request<Basket>(`/baskets/`, {
+    method: 'POST',
+    body: JSON.stringify({ name, description: description ?? null }),
+  })
+}
+
+export function updateBasket(
+  id: string,
+  patch: Partial<Pick<Basket, 'name' | 'description'>>,
+): Promise<Basket> {
+  return request<Basket>(`/baskets/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deleteBasket(id: string): Promise<void> {
+  return fetch(`/api/baskets/${id}/`, { method: 'DELETE' }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
+}
+
+export function addBasketSoftware(
+  basketId: string,
+  payload: { software: string; software_version: string },
+): Promise<unknown> {
+  return request(`/baskets/${basketId}/software/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateBasketSoftware(
+  basketId: string,
+  softwareId: string,
+  patch: { software_version: string },
+): Promise<unknown> {
+  return request(`/baskets/${basketId}/software/${softwareId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function removeBasketSoftware(basketId: string, softwareId: string): Promise<void> {
+  return fetch(`/api/baskets/${basketId}/software/${softwareId}/`, { method: 'DELETE' }).then(
+    (r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+    },
+  )
+}
+
+// Per-server basket assignment
+export function getServerBaskets(orgId: string, serverId: string): Promise<{ basket_ids: string[] }> {
+  return request<{ basket_ids: string[] }>(
+    `/organizations/${orgId}/servers/${serverId}/baskets/`,
+  )
+}
+
+export function setServerBaskets(
+  orgId: string,
+  serverId: string,
+  basketIds: string[],
+): Promise<{ basket_ids: string[] }> {
+  return request<{ basket_ids: string[] }>(
+    `/organizations/${orgId}/servers/${serverId}/baskets/`,
+    { method: 'PUT', body: JSON.stringify({ basket_ids: basketIds }) },
+  )
+}
+
+// Per-server installed software
+export function listInstalledSoftware(
+  orgId: string,
+  serverId: string,
+): Promise<ServerInstalledSoftwareEntry[]> {
+  return request<ServerInstalledSoftwareEntry[]>(
+    `/organizations/${orgId}/servers/${serverId}/installed/`,
+  )
+}
+
+export function addInstalledSoftware(
+  orgId: string,
+  serverId: string,
+  payload: { software: string; software_version: string; software_release?: string | null },
+): Promise<ServerInstalledSoftwareEntry> {
+  return request<ServerInstalledSoftwareEntry>(
+    `/organizations/${orgId}/servers/${serverId}/installed/`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  )
+}
+
+export function updateInstalledSoftware(
+  orgId: string,
+  serverId: string,
+  id: string,
+  patch: { software_version?: string; software_release?: string | null },
+): Promise<ServerInstalledSoftwareEntry> {
+  return request<ServerInstalledSoftwareEntry>(
+    `/organizations/${orgId}/servers/${serverId}/installed/${id}/`,
+    { method: 'PATCH', body: JSON.stringify(patch) },
+  )
+}
+
+export function removeInstalledSoftware(
+  orgId: string,
+  serverId: string,
+  id: string,
+): Promise<void> {
+  return fetch(`/api/organizations/${orgId}/servers/${serverId}/installed/${id}/`, {
+    method: 'DELETE',
+  }).then((r) => {
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
   })
 }
