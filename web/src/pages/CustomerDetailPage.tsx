@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { getOrganization, listOrgUsers, updateOrganization, updateOrgUser } from '../api'
+import { CustomerAnalyticsSection } from '../components/CustomerAnalyticsSection'
 import { CustomerSystemsSection } from '../components/CustomerSystemsSection'
 import type { AmsLevel, EditableOrgFields, Organization, OrgUser, ZabbixStatus } from '../types'
 
@@ -57,6 +58,7 @@ export function CustomerDetailPage() {
       <DetailsSection org={org} onUpdated={setOrg} />
       <CustomerSystemsSection orgId={id} />
       <UsersSection orgId={id} users={users} onUsersChanged={setUsers} />
+      <CustomerAnalyticsSection orgId={id} />
     </div>
   )
 }

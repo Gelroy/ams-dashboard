@@ -504,3 +504,78 @@ export function listPatchHistory(filter?: {
   const tail = qs.toString() ? `?${qs.toString()}` : ''
   return request(`/patch-history/${tail}`)
 }
+
+// Analytics
+export function listAnalyticDefinitions(): Promise<import('./types').AnalyticDefinition[]> {
+  return request(`/analytic-definitions/`)
+}
+
+export function createAnalyticDefinition(payload: {
+  name: string
+  frequency: import('./types').AnalyticFrequency
+}): Promise<import('./types').AnalyticDefinition> {
+  return request(`/analytic-definitions/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateAnalyticDefinition(
+  id: string,
+  patch: Partial<{ name: string; frequency: import('./types').AnalyticFrequency }>,
+): Promise<import('./types').AnalyticDefinition> {
+  return request(`/analytic-definitions/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deleteAnalyticDefinition(id: string): Promise<void> {
+  return fetch(`/api/analytic-definitions/${id}/`, { method: 'DELETE' }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
+}
+
+export function listCustomerAnalytics(
+  organizationId: string,
+): Promise<import('./types').CustomerAnalytic[]> {
+  return request(`/customer-analytics/?organization=${organizationId}`)
+}
+
+export function createCustomerAnalytic(payload: {
+  organization: string
+  environment: string
+  analytic_definition: string
+}): Promise<import('./types').CustomerAnalytic> {
+  return request(`/customer-analytics/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteCustomerAnalytic(id: string): Promise<void> {
+  return fetch(`/api/customer-analytics/${id}/`, { method: 'DELETE' }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
+}
+
+export function recordAnalyticHistory(
+  customerAnalyticId: string,
+  payload: { value?: number | string | null; description?: string | null },
+): Promise<import('./types').CustomerAnalyticHistoryEntry> {
+  return request(`/customer-analytics/${customerAnalyticId}/history/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteAnalyticHistory(
+  customerAnalyticId: string,
+  historyId: string,
+): Promise<void> {
+  return fetch(`/api/customer-analytics/${customerAnalyticId}/history/${historyId}/`, {
+    method: 'DELETE',
+  }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
+}

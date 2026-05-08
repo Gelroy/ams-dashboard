@@ -219,3 +219,30 @@ export interface PatchHistoryEntry {
   from_release: string | null
   to_release: string
 }
+
+export type AnalyticFrequency = 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly'
+
+export interface AnalyticDefinition {
+  id: string
+  name: string
+  frequency: AnalyticFrequency
+}
+
+export interface CustomerAnalyticHistoryEntry {
+  id: string
+  customer_analytic: string
+  captured_at: string
+  value: string | null  // DecimalField → string in DRF
+  description: string | null
+}
+
+export interface CustomerAnalytic {
+  id: string
+  organization: string
+  environment: string
+  environment_name: string
+  analytic_definition: string
+  definition_name: string
+  frequency: AnalyticFrequency
+  history: CustomerAnalyticHistoryEntry[]
+}
