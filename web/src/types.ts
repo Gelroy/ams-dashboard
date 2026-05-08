@@ -246,3 +246,50 @@ export interface CustomerAnalytic {
   frequency: AnalyticFrequency
   history: CustomerAnalyticHistoryEntry[]
 }
+
+export interface Staff {
+  id: string
+  name: string
+  email: string | null
+  phone: string | null
+  cognito_sub: string | null
+  sme_organization_ids: string[]
+}
+
+export type ActivityType = 'Meeting' | 'Patch' | 'Cert' | 'Review' | 'Other'
+export type ActivityPriority = 'High' | 'Medium' | 'Low'
+export type ActivityStatus = 'scheduled' | 'completed'
+
+export interface Activity {
+  id: string
+  name: string
+  scheduled_at: string
+  organization: string | null
+  organization_name: string | null
+  assigned_staff: string | null
+  assigned_staff_name: string | null
+  type: ActivityType
+  priority: ActivityPriority
+  duration: string | null
+  notes: string | null
+  status: ActivityStatus
+  completed_at: string | null
+}
+
+export interface CriticalEvent {
+  date: string
+  time: string | null
+  kind: 'activity' | 'cert' | 'patch'
+  label: string
+  source_kind: string
+  source_id: string
+  organization_id: string | null
+  type?: ActivityType
+  priority?: ActivityPriority
+}
+
+export interface CriticalCalendar {
+  start: string
+  end: string
+  events: CriticalEvent[]
+}

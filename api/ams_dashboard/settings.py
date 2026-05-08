@@ -37,6 +37,8 @@ INSTALLED_APPS = [
     "baskets",
     "patching",
     "analytics",
+    "staff",
+    "activities",
 ]
 
 MIDDLEWARE = [

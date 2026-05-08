@@ -579,3 +579,91 @@ export function deleteAnalyticHistory(
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
   })
 }
+
+// Staff
+export function listStaff(): Promise<import('./types').Staff[]> {
+  return request(`/staff/`)
+}
+
+export function createStaff(payload: {
+  name: string
+  email?: string | null
+  phone?: string | null
+}): Promise<import('./types').Staff> {
+  return request(`/staff/`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function updateStaff(
+  id: string,
+  patch: Partial<Pick<import('./types').Staff, 'name' | 'email' | 'phone' | 'cognito_sub'>>,
+): Promise<import('./types').Staff> {
+  return request(`/staff/${id}/`, { method: 'PATCH', body: JSON.stringify(patch) })
+}
+
+export function deleteStaff(id: string): Promise<void> {
+  return fetch(`/api/staff/${id}/`, { method: 'DELETE' }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
+}
+
+export function setStaffSmeOrganizations(
+  id: string,
+  organizationIds: string[],
+): Promise<import('./types').Staff> {
+  return request(`/staff/${id}/sme-organizations/`, {
+    method: 'PUT',
+    body: JSON.stringify({ organization_ids: organizationIds }),
+  })
+}
+
+// Activities
+export function listActivities(
+  status?: import('./types').ActivityStatus | 'all',
+): Promise<import('./types').Activity[]> {
+  const tail = status && status !== 'all' ? `?status=${status}` : ''
+  return request(`/activities/${tail}`)
+}
+
+export function createActivity(payload: {
+  name: string
+  scheduled_at: string
+  organization?: string | null
+  assigned_staff?: string | null
+  type?: import('./types').ActivityType
+  priority?: import('./types').ActivityPriority
+  duration?: string | null
+  notes?: string | null
+}): Promise<import('./types').Activity> {
+  return request(`/activities/`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function updateActivity(
+  id: string,
+  patch: Partial<{
+    name: string
+    scheduled_at: string
+    organization: string | null
+    assigned_staff: string | null
+    type: import('./types').ActivityType
+    priority: import('./types').ActivityPriority
+    duration: string | null
+    notes: string | null
+  }>,
+): Promise<import('./types').Activity> {
+  return request(`/activities/${id}/`, { method: 'PATCH', body: JSON.stringify(patch) })
+}
+
+export function deleteActivity(id: string): Promise<void> {
+  return fetch(`/api/activities/${id}/`, { method: 'DELETE' }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
+}
+
+export function completeActivity(id: string): Promise<import('./types').Activity> {
+  return request(`/activities/${id}/complete/`, { method: 'POST' })
+}
+
+// Critical calendar
+export function getCriticalCalendar(weeks = 6): Promise<import('./types').CriticalCalendar> {
+  return request(`/critical/?weeks=${weeks}`)
+}

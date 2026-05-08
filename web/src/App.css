@@ -470,6 +470,66 @@
   font-weight: 500;
 }
 
+/* ── Critical calendar ── */
+.critical-list {
+  background: var(--color-bg-primary);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.critical-day {
+  border-bottom: 0.5px solid var(--color-border);
+}
+.critical-day:last-child {
+  border-bottom: none;
+}
+.critical-date {
+  padding: 8px 14px;
+  background: var(--color-bg-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+.critical-today {
+  background: #fef6f0;
+  color: #b45309;
+}
+.critical-event {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 0.5px solid var(--color-border);
+  font-size: 12px;
+  color: var(--color-text-primary);
+  text-decoration: none;
+}
+.critical-event:hover {
+  background: var(--color-bg-secondary);
+}
+.critical-time {
+  width: 50px;
+  color: var(--color-text-secondary);
+  font-family: ui-monospace, Consolas, monospace;
+}
+.critical-kind {
+  width: 70px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+.critical-event-cert .critical-kind {
+  color: #b91c1c;
+}
+.critical-event-patch .critical-kind {
+  color: #047857;
+}
+.critical-event-activity .critical-kind {
+  color: #1d4ed8;
+}
+
 /* ── Errors ── */
 .error-banner {
   margin-bottom: 1rem;

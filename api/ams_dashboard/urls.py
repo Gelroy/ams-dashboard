@@ -15,4 +15,6 @@ urlpatterns = [
     path("api/", include("baskets.urls")),
     path("api/", include("patching.urls")),
     path("api/", include("analytics.urls")),
+    path("api/", include("staff.urls")),
+    path("api/", include("activities.urls")),
 ]
