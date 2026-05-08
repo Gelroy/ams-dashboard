@@ -2,4 +2,7 @@ from django.apps import AppConfig
 
 
 class BasketsConfig(AppConfig):
-    name = 'baskets'
+    name = "baskets"
+
+    def ready(self):
+        from . import signals  # noqa: F401
