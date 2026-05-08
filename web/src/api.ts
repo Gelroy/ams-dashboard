@@ -455,3 +455,52 @@ export function removePatchPlanGroup(planId: string, groupId: string): Promise<v
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
   })
 }
+
+// Patch Executions
+export function listPatchExecutions(
+  status: 'active' | 'completed' | 'aborted' | 'all' = 'active',
+): Promise<import('./types').PatchExecution[]> {
+  const qs = status === 'all' ? '' : `?status=${status}`
+  return request(`/patch-executions/${qs}`)
+}
+
+export function createPatchExecution(payload: {
+  organization: string
+  environment: string
+  basket: string
+  patch_plan?: string | null
+}): Promise<import('./types').PatchExecution> {
+  return request(`/patch-executions/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function markStepDone(
+  executionId: string,
+  stepId: string,
+): Promise<{ finalized: boolean; execution: import('./types').PatchExecution }> {
+  return request(`/patch-executions/${executionId}/steps/${stepId}/done/`, { method: 'POST' })
+}
+
+export function abortPatchExecution(
+  executionId: string,
+  notes: string,
+): Promise<import('./types').PatchExecution> {
+  return request(`/patch-executions/${executionId}/abort/`, {
+    method: 'POST',
+    body: JSON.stringify({ notes }),
+  })
+}
+
+// Patch History
+export function listPatchHistory(filter?: {
+  organization?: string
+  environment?: string
+}): Promise<import('./types').PatchHistoryEntry[]> {
+  const qs = new URLSearchParams()
+  if (filter?.organization) qs.set('organization', filter.organization)
+  if (filter?.environment) qs.set('environment', filter.environment)
+  const tail = qs.toString() ? `?${qs.toString()}` : ''
+  return request(`/patch-history/${tail}`)
+}

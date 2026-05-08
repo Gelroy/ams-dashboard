@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 
 import {
+  abortPatchExecution,
   addPatchPlanGroup,
+  createPatchExecution,
   createPatchGroup,
   createPatchGroupStep,
   createPatchPlan,
@@ -9,14 +11,24 @@ import {
   deletePatchGroupStep,
   deletePatchPlan,
   listBaskets,
+  listOrganizations,
+  listPatchExecutions,
   listPatchGroups,
   listPatchPlans,
+  markStepDone,
   removePatchPlanGroup,
   updatePatchGroup,
   updatePatchGroupStep,
   updatePatchPlan,
 } from '../api'
-import type { Basket, PatchGroup, PatchGroupStep, PatchPlan } from '../types'
+import type {
+  Basket,
+  Organization,
+  PatchExecution,
+  PatchGroup,
+  PatchGroupStep,
+  PatchPlan,
+} from '../types'
 
 type Tab = 'groups' | 'plans' | 'executions'
 
@@ -36,12 +48,7 @@ export function PatchExecutionPage() {
 
       {tab === 'groups' && <GroupsTab />}
       {tab === 'plans' && <PlansTab />}
-      {tab === 'executions' && (
-        <div className="state-cell">
-          Executions UI lands in the next slice — Plans + Groups defined here are
-          the inputs.
-        </div>
-      )}
+      {tab === 'executions' && <ExecutionsTab />}
     </div>
   )
 }
@@ -469,6 +476,327 @@ function PatchPlanCard({
                 ))}
               </select>
             </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Executions
+   ════════════════════════════════════════════════════════════════════════════ */
+
+function ExecutionsTab() {
+  const [executions, setExecutions] = useState<PatchExecution[]>([])
+  const [orgs, setOrgs] = useState<Organization[]>([])
+  const [baskets, setBaskets] = useState<Basket[]>([])
+  const [plans, setPlans] = useState<PatchPlan[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [showAdd, setShowAdd] = useState(false)
+
+  const refresh = () => {
+    setLoading(true)
+    setError(null)
+    Promise.all([
+      listPatchExecutions('active'),
+      listOrganizations({ limit: 200 }),
+      listBaskets(),
+      listPatchPlans(),
+    ])
+      .then(([ex, orgsRes, b, p]) => {
+        setExecutions(ex)
+        setOrgs(orgsRes.results)
+        setBaskets(b)
+        setPlans(p)
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
+  }
+  useEffect(refresh, [])
+
+  return (
+    <div>
+      {error && <div className="error-banner">{error}</div>}
+
+      <div className="add-row">
+        <button className="btn" onClick={() => setShowAdd(!showAdd)}>
+          {showAdd ? 'Cancel' : '+ Add Execution'}
+        </button>
+      </div>
+      {showAdd && (
+        <AddExecutionForm
+          orgs={orgs}
+          baskets={baskets}
+          plans={plans}
+          onAdded={() => {
+            setShowAdd(false)
+            refresh()
+          }}
+        />
+      )}
+
+      {loading && <div className="state-cell">Loading…</div>}
+      {!loading && executions.length === 0 && (
+        <div className="state-cell">No active executions.</div>
+      )}
+
+      {executions.map((ex) => (
+        <ExecutionCard key={ex.id} execution={ex} onChanged={refresh} />
+      ))}
+    </div>
+  )
+}
+
+function AddExecutionForm({
+  orgs,
+  baskets,
+  plans,
+  onAdded,
+}: {
+  orgs: Organization[]
+  baskets: Basket[]
+  plans: PatchPlan[]
+  onAdded: () => void
+}) {
+  const [orgId, setOrgId] = useState('')
+  const [envId, setEnvId] = useState('')
+  const [basketId, setBasketId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [orgEnvs, setOrgEnvs] = useState<{ id: string; name: string }[]>([])
+
+  useEffect(() => {
+    if (!orgId) {
+      setOrgEnvs([])
+      return
+    }
+    fetch(`/api/organizations/${orgId}/environments/`)
+      .then((r) => r.json())
+      .then((d: { id: string; name: string }[]) => setOrgEnvs(d))
+  }, [orgId])
+
+  // Auto-pick the matching plan if exactly one plan references the chosen basket.
+  const matchingPlan = plans.find((p) => p.basket === basketId)
+
+  const submit = async () => {
+    if (!orgId || !envId || !basketId) return
+    setBusy(true)
+    setError(null)
+    try {
+      await createPatchExecution({
+        organization: orgId,
+        environment: envId,
+        basket: basketId,
+        patch_plan: matchingPlan?.id ?? null,
+      })
+      onAdded()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="catalog-card" style={{ padding: 12 }}>
+      <div className="add-row">
+        <select
+          className="input compact"
+          value={orgId}
+          onChange={(e) => {
+            setOrgId(e.target.value)
+            setEnvId('')
+          }}
+        >
+          <option value="">— Customer —</option>
+          {orgs.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.display_name}
+            </option>
+          ))}
+        </select>
+        <select
+          className="input compact"
+          value={envId}
+          disabled={!orgId}
+          onChange={(e) => setEnvId(e.target.value)}
+        >
+          <option value="">— Env —</option>
+          {orgEnvs.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.name}
+            </option>
+          ))}
+        </select>
+        <select
+          className="input compact"
+          value={basketId}
+          onChange={(e) => setBasketId(e.target.value)}
+        >
+          <option value="">— Basket —</option>
+          {baskets.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+        <button className="btn btn-primary" disabled={busy || !orgId || !envId || !basketId} onClick={submit}>
+          Create
+        </button>
+        {error && <span className="error-text">{error}</span>}
+      </div>
+      {basketId && (
+        <div className="meta" style={{ marginTop: 6 }}>
+          {matchingPlan
+            ? `Will use plan: ${matchingPlan.name}`
+            : 'No plan linked to this basket — execution will have no steps.'}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ExecutionCard({
+  execution,
+  onChanged,
+}: {
+  execution: PatchExecution
+  onChanged: () => void
+}) {
+  const [open, setOpen] = useState(true)
+  const [aborting, setAborting] = useState(false)
+  const [abortNotes, setAbortNotes] = useState('')
+
+  const doneCount = execution.steps.filter((s) => s.done).length
+  const total = execution.steps.length
+  const started = !!execution.started_at
+
+  const submitStep = (stepId: string) =>
+    markStepDone(execution.id, stepId).then(onChanged)
+
+  const submitAbort = async () => {
+    if (!abortNotes.trim()) return
+    await abortPatchExecution(execution.id, abortNotes.trim())
+    setAborting(false)
+    setAbortNotes('')
+    onChanged()
+  }
+
+  return (
+    <div className="catalog-card">
+      <div className="catalog-row">
+        <button className="chevron-btn" onClick={() => setOpen(!open)}>
+          {open ? '▼' : '▶'}
+        </button>
+        <strong>
+          {execution.organization_name} — {execution.environment_name}
+        </strong>
+        <span className="meta">
+          {execution.basket_name} · {doneCount}/{total} steps
+        </span>
+        <span className="badge patch-yes" style={{ marginLeft: 'auto' }}>Active</span>
+      </div>
+
+      {open && (
+        <div className="catalog-children">
+          <div className="meta" style={{ marginBottom: 8 }}>
+            {execution.plan_name ? `Plan: ${execution.plan_name}` : 'No plan linked'}
+            {started && (
+              <>
+                {' · '}Started {new Date(execution.started_at!).toLocaleString()}
+              </>
+            )}
+          </div>
+
+          {aborting ? (
+            <div className="catalog-card" style={{ padding: 10, marginBottom: 10, background: '#fef6f6' }}>
+              <div className="field-label">Abort reason (required)</div>
+              <textarea
+                className="input textarea"
+                rows={3}
+                value={abortNotes}
+                onChange={(e) => setAbortNotes(e.target.value)}
+              />
+              <div className="add-row">
+                <button className="btn btn-primary" onClick={submitAbort} disabled={!abortNotes.trim()}>
+                  Confirm Abort
+                </button>
+                <button className="btn" onClick={() => setAborting(false)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : started && (
+            <button
+              className="btn"
+              style={{ marginBottom: 8, color: '#b91c1c' }}
+              onClick={() => setAborting(true)}
+            >
+              Abort
+            </button>
+          )}
+
+          {execution.aborts.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <div className="field-label">Previous attempts ({execution.aborts.length})</div>
+              {execution.aborts.map((a) => (
+                <div key={a.id} className="meta" style={{ padding: '4px 0' }}>
+                  Attempt {a.attempt_num} · {a.attempt_date} · elapsed {a.elapsed} ·
+                  {' '}
+                  {a.steps_completed}/{a.total_steps} steps · {a.notes}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {total === 0 ? (
+            <div className="state-cell">
+              No steps. Link a Plan with Groups to define what to run.
+            </div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 36 }}>#</th>
+                  <th>Description</th>
+                  <th style={{ width: 70 }}>Est.</th>
+                  <th style={{ width: 110 }}>Action</th>
+                  <th style={{ width: 100 }}>Elapsed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {execution.steps.map((s, i) => {
+                  const prevDone = i === 0 || execution.steps[i - 1].done
+                  let action = null
+                  if (s.done) {
+                    action = <span style={{ color: '#047857' }}>✓ Done</span>
+                  } else if (prevDone) {
+                    action = (
+                      <button
+                        className="btn btn-primary"
+                        style={{ padding: '2px 10px', fontSize: 11 }}
+                        onClick={() => submitStep(s.id)}
+                      >
+                        Done
+                      </button>
+                    )
+                  } else {
+                    action = <span className="meta">waiting</span>
+                  }
+                  return (
+                    <tr key={s.id} style={{ opacity: s.done ? 0.5 : 1 }}>
+                      <td>{s.step_num}</td>
+                      <td>{s.description}</td>
+                      <td>{s.est_time ?? '—'}</td>
+                      <td>{action}</td>
+                      <td className="meta">{s.total_time ?? '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           )}
         </div>
       )}

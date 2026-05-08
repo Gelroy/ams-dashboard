@@ -164,3 +164,58 @@ export interface PatchPlan {
   basket_name: string | null
   plan_groups: PatchPlanGroupRef[]
 }
+
+export type PatchExecutionStatus = 'active' | 'completed' | 'aborted'
+
+export interface PatchExecutionStep {
+  id: string
+  step_num: number
+  description: string
+  est_time: string | null
+  per_server: boolean
+  started_at: string | null
+  finished_at: string | null
+  total_time: string | null
+  done: boolean
+}
+
+export interface PatchExecutionAbort {
+  id: string
+  attempt_num: number
+  attempt_date: string | null
+  elapsed: string | null
+  steps_completed: number
+  total_steps: number
+  notes: string
+  created_at: string
+}
+
+export interface PatchExecution {
+  id: string
+  patch_plan: string | null
+  plan_name: string | null
+  basket: string
+  basket_name: string | null
+  organization: string
+  organization_name: string
+  environment: string
+  environment_name: string
+  status: PatchExecutionStatus
+  patch_date: string | null
+  started_at: string | null
+  completed_at: string | null
+  total_time: string | null
+  steps: PatchExecutionStep[]
+  aborts: PatchExecutionAbort[]
+}
+
+export interface PatchHistoryEntry {
+  id: string
+  organization: string
+  environment: string
+  environment_name: string
+  patched_on: string
+  software_name: string
+  from_release: string | null
+  to_release: string
+}
