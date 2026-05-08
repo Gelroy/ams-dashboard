@@ -221,11 +221,13 @@ export interface PatchHistoryEntry {
 }
 
 export type AnalyticFrequency = 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly'
+export type AnalyticScope = 'environment' | 'server'
 
 export interface AnalyticDefinition {
   id: string
   name: string
   frequency: AnalyticFrequency
+  scope: AnalyticScope
 }
 
 export interface CustomerAnalyticHistoryEntry {
@@ -241,9 +243,12 @@ export interface CustomerAnalytic {
   organization: string
   environment: string
   environment_name: string
+  server: string | null
+  server_name: string | null
   analytic_definition: string
   definition_name: string
   frequency: AnalyticFrequency
+  scope: AnalyticScope
   history: CustomerAnalyticHistoryEntry[]
 }
 

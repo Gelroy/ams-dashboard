@@ -5,14 +5,14 @@ from .models import AnalyticDefinition, CustomerAnalytic, CustomerAnalyticHistor
 
 @admin.register(AnalyticDefinition)
 class AnalyticDefinitionAdmin(admin.ModelAdmin):
-    list_display = ("name", "frequency")
-    list_filter = ("frequency",)
+    list_display = ("name", "frequency", "scope")
+    list_filter = ("frequency", "scope")
     search_fields = ("name",)
 
 
 @admin.register(CustomerAnalytic)
 class CustomerAnalyticAdmin(admin.ModelAdmin):
-    list_display = ("organization", "environment", "analytic_definition")
+    list_display = ("organization", "environment", "server", "analytic_definition")
     list_filter = ("environment__name",)
     search_fields = ("analytic_definition__name", "organization__jira_name")
 

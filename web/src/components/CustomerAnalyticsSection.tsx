@@ -7,9 +7,15 @@ import {
   listAnalyticDefinitions,
   listCustomerAnalytics,
   listEnvironments,
+  listServers,
   recordAnalyticHistory,
 } from '../api'
-import type { AnalyticDefinition, CustomerAnalytic, Environment } from '../types'
+import type {
+  AnalyticDefinition,
+  CustomerAnalytic,
+  Environment,
+  Server,
+} from '../types'
 
 interface Props {
   orgId: string
@@ -19,6 +25,7 @@ export function CustomerAnalyticsSection({ orgId }: Props) {
   const [items, setItems] = useState<CustomerAnalytic[]>([])
   const [defs, setDefs] = useState<AnalyticDefinition[]>([])
   const [envs, setEnvs] = useState<Environment[]>([])
+  const [servers, setServers] = useState<Server[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -29,11 +36,13 @@ export function CustomerAnalyticsSection({ orgId }: Props) {
       listCustomerAnalytics(orgId),
       listAnalyticDefinitions(),
       listEnvironments(orgId),
+      listServers(orgId),
     ])
-      .then(([ca, d, e]) => {
+      .then(([ca, d, e, s]) => {
         setItems(ca)
         setDefs(d)
         setEnvs(e)
+        setServers(s)
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
@@ -68,7 +77,8 @@ export function CustomerAnalyticsSection({ orgId }: Props) {
         orgId={orgId}
         defs={defs}
         envs={envs}
-        existing={items.map((ca) => `${ca.environment}:${ca.analytic_definition}`)}
+        servers={servers}
+        existing={items}
         onAdded={refresh}
       />
     </section>
@@ -83,6 +93,9 @@ function CustomerAnalyticCard({
   onChanged: () => void
 }) {
   const [open, setOpen] = useState(false)
+  const target = customerAnalytic.server_name
+    ? `${customerAnalytic.environment_name} · ${customerAnalytic.server_name}`
+    : customerAnalytic.environment_name
   return (
     <div className="catalog-card">
       <div className="catalog-row">
@@ -90,7 +103,7 @@ function CustomerAnalyticCard({
           {open ? '▼' : '▶'}
         </button>
         <strong>{customerAnalytic.definition_name}</strong>
-        <span className="badge">{customerAnalytic.environment_name}</span>
+        <span className="badge">{target}</span>
         <span className="badge">{customerAnalytic.frequency}</span>
         <span className="meta">
           {customerAnalytic.history.length} capture
@@ -99,7 +112,7 @@ function CustomerAnalyticCard({
         <button
           className="btn-icon"
           onClick={() => {
-            if (window.confirm(`Stop tracking ${customerAnalytic.definition_name} in ${customerAnalytic.environment_name}?`))
+            if (window.confirm(`Stop tracking ${customerAnalytic.definition_name} on ${target}?`))
               deleteCustomerAnalytic(customerAnalytic.id).then(onChanged)
           }}
         >
@@ -205,24 +218,40 @@ function AddCustomerAnalyticForm({
   orgId,
   defs,
   envs,
+  servers,
   existing,
   onAdded,
 }: {
   orgId: string
   defs: AnalyticDefinition[]
   envs: Environment[]
-  existing: string[]
+  servers: Server[]
+  existing: CustomerAnalytic[]
   onAdded: () => void
 }) {
   const [defId, setDefId] = useState('')
   const [envId, setEnvId] = useState('')
+  const [serverId, setServerId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const isDuplicate = !!defId && !!envId && existing.includes(`${envId}:${defId}`)
+  const def = defs.find((d) => d.id === defId)
+  const isServerScope = def?.scope === 'server'
+  const envServers = servers.filter((s) => s.environment === envId)
+
+  const dupKey = isServerScope
+    ? existing.find((x) => x.analytic_definition === defId && x.server === serverId)
+    : existing.find(
+        (x) => x.analytic_definition === defId && x.environment === envId && x.server === null,
+      )
+  const isDuplicate = !!defId && !!envId && (!isServerScope || !!serverId) && !!dupKey
+
+  const ready = isServerScope
+    ? !!defId && !!envId && !!serverId
+    : !!defId && !!envId
 
   const submit = async () => {
-    if (!defId || !envId || isDuplicate) return
+    if (!ready || isDuplicate) return
     setBusy(true)
     setError(null)
     try {
@@ -230,9 +259,11 @@ function AddCustomerAnalyticForm({
         organization: orgId,
         environment: envId,
         analytic_definition: defId,
+        server: isServerScope ? serverId : null,
       })
       setDefId('')
       setEnvId('')
+      setServerId('')
       onAdded()
     } catch (e) {
       setError((e as Error).message)
@@ -251,15 +282,29 @@ function AddCustomerAnalyticForm({
 
   return (
     <div className="add-row">
-      <select className="input compact" value={defId} onChange={(e) => setDefId(e.target.value)}>
+      <select
+        className="input compact"
+        value={defId}
+        onChange={(e) => {
+          setDefId(e.target.value)
+          setServerId('')
+        }}
+      >
         <option value="">— Analytic —</option>
         {defs.map((d) => (
           <option key={d.id} value={d.id}>
-            {d.name} ({d.frequency})
+            {d.name} ({d.frequency}, {d.scope === 'server' ? 'per server' : 'per env'})
           </option>
         ))}
       </select>
-      <select className="input compact" value={envId} onChange={(e) => setEnvId(e.target.value)}>
+      <select
+        className="input compact"
+        value={envId}
+        onChange={(e) => {
+          setEnvId(e.target.value)
+          setServerId('')
+        }}
+      >
         <option value="">— Env —</option>
         {envs.map((e) => (
           <option key={e.id} value={e.id}>
@@ -267,7 +312,22 @@ function AddCustomerAnalyticForm({
           </option>
         ))}
       </select>
-      <button className="btn" disabled={busy || !defId || !envId || isDuplicate} onClick={submit}>
+      {isServerScope && (
+        <select
+          className="input compact"
+          value={serverId}
+          disabled={!envId}
+          onChange={(e) => setServerId(e.target.value)}
+        >
+          <option value="">— Server —</option>
+          {envServers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      )}
+      <button className="btn" disabled={busy || !ready || isDuplicate} onClick={submit}>
         + Track
       </button>
       {isDuplicate && <span className="meta">already tracked</span>}

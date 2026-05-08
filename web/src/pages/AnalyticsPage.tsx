@@ -6,9 +6,13 @@ import {
   listAnalyticDefinitions,
   updateAnalyticDefinition,
 } from '../api'
-import type { AnalyticDefinition, AnalyticFrequency } from '../types'
+import type { AnalyticDefinition, AnalyticFrequency, AnalyticScope } from '../types'
 
 const FREQUENCIES: AnalyticFrequency[] = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly']
+const SCOPES: { value: AnalyticScope; label: string }[] = [
+  { value: 'environment', label: 'Environment' },
+  { value: 'server', label: 'Server' },
+]
 
 export function AnalyticsPage() {
   const [defs, setDefs] = useState<AnalyticDefinition[]>([])
@@ -81,6 +85,22 @@ function DefinitionRow({ def, onChanged }: { def: AnalyticDefinition; onChanged:
             </option>
           ))}
         </select>
+        <select
+          className="input compact"
+          value={def.scope}
+          onChange={(e) =>
+            updateAnalyticDefinition(def.id, {
+              scope: e.target.value as AnalyticScope,
+            }).then(onChanged)
+          }
+          title="Scope: Environment = one capture per env; Server = one capture per server"
+        >
+          {SCOPES.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
         <button
           className="btn-icon"
           onClick={() => {
@@ -98,6 +118,7 @@ function DefinitionRow({ def, onChanged }: { def: AnalyticDefinition; onChanged:
 function AddDefinitionForm({ onAdded }: { onAdded: () => void }) {
   const [name, setName] = useState('')
   const [frequency, setFrequency] = useState<AnalyticFrequency>('Monthly')
+  const [scope, setScope] = useState<AnalyticScope>('environment')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -106,9 +127,10 @@ function AddDefinitionForm({ onAdded }: { onAdded: () => void }) {
     setBusy(true)
     setError(null)
     try {
-      await createAnalyticDefinition({ name: name.trim(), frequency })
+      await createAnalyticDefinition({ name: name.trim(), frequency, scope })
       setName('')
       setFrequency('Monthly')
+      setScope('environment')
       onAdded()
     } catch (e) {
       setError((e as Error).message)
@@ -136,6 +158,17 @@ function AddDefinitionForm({ onAdded }: { onAdded: () => void }) {
         {FREQUENCIES.map((f) => (
           <option key={f} value={f}>
             {f}
+          </option>
+        ))}
+      </select>
+      <select
+        className="input compact"
+        value={scope}
+        onChange={(e) => setScope(e.target.value as AnalyticScope)}
+      >
+        {SCOPES.map((s) => (
+          <option key={s.value} value={s.value}>
+            {s.label}
           </option>
         ))}
       </select>

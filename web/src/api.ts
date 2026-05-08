@@ -513,6 +513,7 @@ export function listAnalyticDefinitions(): Promise<import('./types').AnalyticDef
 export function createAnalyticDefinition(payload: {
   name: string
   frequency: import('./types').AnalyticFrequency
+  scope?: import('./types').AnalyticScope
 }): Promise<import('./types').AnalyticDefinition> {
   return request(`/analytic-definitions/`, {
     method: 'POST',
@@ -522,7 +523,11 @@ export function createAnalyticDefinition(payload: {
 
 export function updateAnalyticDefinition(
   id: string,
-  patch: Partial<{ name: string; frequency: import('./types').AnalyticFrequency }>,
+  patch: Partial<{
+    name: string
+    frequency: import('./types').AnalyticFrequency
+    scope: import('./types').AnalyticScope
+  }>,
 ): Promise<import('./types').AnalyticDefinition> {
   return request(`/analytic-definitions/${id}/`, {
     method: 'PATCH',
@@ -546,6 +551,7 @@ export function createCustomerAnalytic(payload: {
   organization: string
   environment: string
   analytic_definition: string
+  server?: string | null
 }): Promise<import('./types').CustomerAnalytic> {
   return request(`/customer-analytics/`, {
     method: 'POST',
