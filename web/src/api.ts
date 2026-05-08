@@ -356,3 +356,102 @@ export function removeInstalledSoftware(
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
   })
 }
+
+// Patch Groups
+export function listPatchGroups(): Promise<import('./types').PatchGroup[]> {
+  return request(`/patch-groups/`)
+}
+
+export function createPatchGroup(name: string): Promise<import('./types').PatchGroup> {
+  return request(`/patch-groups/`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function updatePatchGroup(
+  id: string,
+  patch: { name?: string },
+): Promise<import('./types').PatchGroup> {
+  return request(`/patch-groups/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deletePatchGroup(id: string): Promise<void> {
+  return fetch(`/api/patch-groups/${id}/`, { method: 'DELETE' }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
+}
+
+export function createPatchGroupStep(
+  groupId: string,
+  payload: { step_num: number; description: string; est_time?: string | null; per_server?: boolean },
+): Promise<import('./types').PatchGroupStep> {
+  return request(`/patch-groups/${groupId}/steps/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updatePatchGroupStep(
+  groupId: string,
+  stepId: string,
+  patch: Partial<Pick<import('./types').PatchGroupStep, 'description' | 'est_time' | 'per_server' | 'step_num'>>,
+): Promise<import('./types').PatchGroupStep> {
+  return request(`/patch-groups/${groupId}/steps/${stepId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deletePatchGroupStep(groupId: string, stepId: string): Promise<void> {
+  return fetch(`/api/patch-groups/${groupId}/steps/${stepId}/`, { method: 'DELETE' }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
+}
+
+// Patch Plans
+export function listPatchPlans(): Promise<import('./types').PatchPlan[]> {
+  return request(`/patch-plans/`)
+}
+
+export function createPatchPlan(name: string): Promise<import('./types').PatchPlan> {
+  return request(`/patch-plans/`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function updatePatchPlan(
+  id: string,
+  patch: { name?: string; basket?: string | null },
+): Promise<import('./types').PatchPlan> {
+  return request(`/patch-plans/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deletePatchPlan(id: string): Promise<void> {
+  return fetch(`/api/patch-plans/${id}/`, { method: 'DELETE' }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
+}
+
+export function addPatchPlanGroup(
+  planId: string,
+  payload: { patch_group: string; position: number },
+): Promise<unknown> {
+  return request(`/patch-plans/${planId}/groups/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function removePatchPlanGroup(planId: string, groupId: string): Promise<void> {
+  return fetch(`/api/patch-plans/${planId}/groups/${groupId}/`, { method: 'DELETE' }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
+}

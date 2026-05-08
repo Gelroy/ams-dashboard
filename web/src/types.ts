@@ -133,3 +133,34 @@ export interface ServerInstalledSoftwareEntry {
   software_release: string | null
   release_name: string | null
 }
+
+export interface PatchGroupStep {
+  id: string
+  patch_group: string
+  step_num: number
+  description: string
+  est_time: string | null
+  per_server: boolean
+}
+
+export interface PatchGroup {
+  id: string
+  name: string
+  steps: PatchGroupStep[]
+}
+
+export interface PatchPlanGroupRef {
+  patch_plan: string
+  patch_group: string
+  group_name: string
+  position: number
+  step_count: number
+}
+
+export interface PatchPlan {
+  id: string
+  name: string
+  basket: string | null
+  basket_name: string | null
+  plan_groups: PatchPlanGroupRef[]
+}
