@@ -1,0 +1,36 @@
+# Source-control / editor
+.git
+.gitignore
+.idea
+.vscode
+*.swp
+
+# Python build artifacts
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.pytest_cache
+.ruff_cache
+api/.venv
+
+# Node
+web/node_modules
+web/dist
+web/.vite
+
+# Local env (never bake secrets into the image)
+.env
+**/.env
+**/.env.local
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Infra & docs
+infra
+db
+README*
+*.md

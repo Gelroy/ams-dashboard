@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.http import JsonResponse
-from django.urls import include, path
+from django.urls import include, path, re_path
+
+from .spa import spa_index
 
 
 def health(_request):
@@ -17,4 +19,6 @@ urlpatterns = [
     path("api/", include("analytics.urls")),
     path("api/", include("staff.urls")),
     path("api/", include("activities.urls")),
+    # SPA fallback — must be last; matches every path not consumed above.
+    re_path(r"^.*$", spa_index, name="spa-index"),
 ]
