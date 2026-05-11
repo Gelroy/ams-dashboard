@@ -83,9 +83,21 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "ams_dashboard.wsgi.application"
 
-DATABASES = {
-    "default": env.db("DATABASE_URL"),
-}
+# Database — prefer DATABASE_URL (local dev), fall back to individual vars
+# (production, mapped from the RDS-managed Secrets Manager secret in ECS).
+if env.str("DATABASE_URL", default=""):
+    DATABASES = {"default": env.db("DATABASE_URL")}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "HOST": env("DB_HOST"),
+            "PORT": env("DB_PORT", default="5432"),
+            "USER": env("DB_USER"),
+            "PASSWORD": env("DB_PASSWORD"),
+            "NAME": env("DB_NAME"),
+        }
+    }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
