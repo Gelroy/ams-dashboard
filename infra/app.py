@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import sys
 
 import aws_cdk as cdk
 
@@ -18,10 +19,24 @@ if not account or not region:
         "CDK_DEFAULT_ACCOUNT/REGION resolve, or pass -c account=… -c region=…"
     )
 
-AmsDashboardStack(
-    app,
-    "AmsDashboardStack",
-    env=cdk.Environment(account=account, region=region),
-)
+# Only synthesize the application stack when vpc_id is provided. `cdk bootstrap`
+# loads this file but doesn't need our stack — bootstrap manages the separate
+# CDKToolkit stack. Synthesizing AmsDashboardStack without a real VPC would
+# either error out (no vpc_id) or trigger a Vpc.from_lookup against bogus
+# input. Skipping it here lets `cdk bootstrap` run cleanly.
+vpc_id = app.node.try_get_context("vpc_id")
+if vpc_id:
+    AmsDashboardStack(
+        app,
+        "AmsDashboardStack",
+        env=cdk.Environment(account=account, region=region),
+    )
+else:
+    print(
+        "Note: vpc_id context not set — skipping AmsDashboardStack synthesis. "
+        "This is fine for 'cdk bootstrap'. For 'cdk deploy' / 'cdk synth' / "
+        "'cdk diff', pass -c vpc_id=vpc-xxxxxxxx.",
+        file=sys.stderr,
+    )
 
 app.synth()
