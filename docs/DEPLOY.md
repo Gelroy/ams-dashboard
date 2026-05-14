@@ -41,9 +41,37 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # 2. Bootstrap CDK in the target account/region (only needs to be done once
-#    per account+region per AWS organization).
+#    per account+region per AWS organization). The principal running this
+#    needs broad permissions — typically AdministratorAccess for the
+#    duration of the bootstrap.
 cdk bootstrap aws://<ACCOUNT>/<REGION>
 ```
+
+### Grant the routine-deploy IAM principal its permissions
+
+After bootstrap, day-to-day `cdk deploy` only needs the ability to assume
+the bootstrapped roles plus a few read-only context lookups. The repo
+ships a helper script that creates a least-privilege managed policy and
+attaches it to a chosen IAM user or role:
+
+```bash
+# Attach to an IAM user:
+infra/scripts/grant-cdk-deploy-perms.sh \
+  --account <ACCOUNT_ID> --user <USERNAME>
+
+# …or to a role (e.g. for CI/CD):
+infra/scripts/grant-cdk-deploy-perms.sh \
+  --account <ACCOUNT_ID> --role <ROLENAME>
+
+# Preview the policy JSON without making any changes:
+infra/scripts/grant-cdk-deploy-perms.sh \
+  --account <ACCOUNT_ID> --user <USERNAME> --dry-run
+```
+
+The script must be run by a principal that can manage IAM in the target
+account (`iam:CreatePolicy`, `iam:CreatePolicyVersion`, `iam:Attach*Policy`).
+It's safe to re-run — it updates the existing policy in place and prunes
+the oldest non-default version when IAM's 5-version limit is hit.
 
 ## First deploy
 
