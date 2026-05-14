@@ -55,6 +55,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 class AmsDashboardStack(cdk.Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs):
+        # Synthesizer reads the bootstrap qualifier from context so this stack
+        # uses the matching cdk-amsdash01-...-role-* roles created by
+        # `cdk bootstrap --qualifier amsdash01`.
+        qualifier = scope.node.try_get_context("@aws-cdk/core:bootstrapQualifier")
+        if qualifier and "synthesizer" not in kwargs:
+            kwargs["synthesizer"] = cdk.DefaultStackSynthesizer(qualifier=qualifier)
         super().__init__(scope, construct_id, **kwargs)
 
         # ── Context ─────────────────────────────────────────────────────
