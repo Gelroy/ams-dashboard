@@ -29,6 +29,35 @@ Information needed from your platform / security teams before first deploy:
 | Internal DNS name to CNAME at the ALB | DNS is provisioned outside CDK; deploy outputs the ALB DNS name to point at |
 | Environment label (`prod`, `staging`, …) | `cdk deploy -c environment=prod` (default: `prod`) |
 | Company-specific tags (CostCenter, Owner, etc.) | `cdk deploy -c tags='{"CostCenter":"4321","Owner":"AMS-IT"}'` |
+| Private subnet IDs (when VPC subnets aren't CDK-tagged) | `cdk deploy -c private_subnet_ids=subnet-a,subnet-b -c availability_zones=us-west-2a,us-west-2b` |
+
+### When you hit "There are no private subnet groups in this VPC"
+
+CDK's default `Vpc.from_lookup` identifies subnets by the
+`aws-cdk:subnet-type` tag. VPCs your platform team owns and provisioned
+outside of CDK usually don't carry that tag, and the deploy errors out.
+
+Fix: pass the private subnet IDs (and matching AZs) explicitly:
+
+```bash
+# Find candidates — private subnets typically don't route 0.0.0.0/0 to
+# an IGW. Quick listing:
+aws ec2 describe-subnets \
+  --filters "Name=vpc-id,Values=vpc-XXXXXXXX" \
+  --query 'Subnets[].{ID:SubnetId,AZ:AvailabilityZone,CIDR:CidrBlock,Public:MapPublicIpOnLaunch}' \
+  --output table
+
+# Then deploy with explicit IDs (at least 2 subnets in different AZs):
+cdk deploy AmsDashboardStack \
+  -c vpc_id=vpc-XXXXXXXX \
+  -c private_subnet_ids=subnet-aaaaaaaa,subnet-bbbbbbbb \
+  -c availability_zones=us-west-2a,us-west-2b
+```
+
+The subnets you supply must have **outbound internet egress** (NAT
+gateway or equivalent) so the API can reach Cognito, the Fargate
+tasks can pull the container image, and the JIRA sync workers can
+reach Atlassian.
 
 ### Tagging
 

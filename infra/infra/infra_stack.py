@@ -14,15 +14,26 @@ Provisions everything the AWS admin needs from a single ``cdk deploy``:
   - A migration TaskDefinition the admin runs once per deploy
 
 Required context (set in cdk.json or via -c flags):
-  - vpc_id                 : the existing shared VPC ID
-  - acm_cert_arn (optional): ACM cert in the same region for the ALB. If
-                             empty, the ALB serves plain HTTP — fine for
-                             initial smoke-testing on the corporate network.
-  - environment (optional) : 'prod', 'staging', etc. Defaults to 'prod'.
-                             Applied as a stack-level tag.
-  - tags (optional)        : JSON object of additional tags to apply
-                             stack-wide, e.g.
-                             -c tags='{"CostCenter":"4321","Owner":"AMS-IT"}'
+  - vpc_id                  : the existing shared VPC ID
+
+Optional context:
+  - acm_cert_arn            : ACM cert in the same region for the ALB. If
+                              empty, the ALB serves plain HTTP — fine for
+                              initial smoke-testing on the corporate network.
+  - private_subnet_ids      : comma-separated list of subnet IDs (e.g.
+                              'subnet-aaa,subnet-bbb'). Required when the
+                              VPC's subnets don't carry CDK's
+                              aws-cdk:subnet-type tag (typical for VPCs
+                              managed outside CDK). Must include ≥2 subnets
+                              in different AZs for ALB high-availability.
+  - availability_zones      : comma-separated AZs matching the subnets,
+                              same order (e.g. 'us-west-2a,us-west-2b').
+                              Required when private_subnet_ids is set.
+  - environment             : 'prod', 'staging', etc. Defaults to 'prod'.
+                              Applied as a stack-level tag.
+  - tags                    : JSON object of additional tags to apply
+                              stack-wide, e.g.
+                              -c tags='{"CostCenter":"4321","Owner":"AMS-IT"}'
 
 Outputs:
   - ALB DNS name (point your internal DNS CNAME at this)
@@ -93,8 +104,44 @@ class AmsDashboardStack(cdk.Stack):
             cdk.Tags.of(self).add(key, value)
 
         # ── Networking ──────────────────────────────────────────────────
-        vpc = ec2.Vpc.from_lookup(self, "Vpc", vpc_id=vpc_id)
-        private_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
+        # Prefer explicit subnet IDs when supplied; fall back to tag-based
+        # discovery via Vpc.from_lookup (which only works if the VPC's
+        # subnets are tagged with aws-cdk:subnet-type).
+        private_subnet_ids_raw = self.node.try_get_context("private_subnet_ids") or ""
+        azs_raw = self.node.try_get_context("availability_zones") or ""
+        subnet_ids = [s.strip() for s in str(private_subnet_ids_raw).split(",") if s.strip()]
+        azs = [a.strip() for a in str(azs_raw).split(",") if a.strip()]
+
+        if subnet_ids:
+            if not azs:
+                raise ValueError(
+                    "When -c private_subnet_ids=... is set, also pass "
+                    "-c availability_zones=us-west-2a,us-west-2b (one AZ per "
+                    "subnet, same order)."
+                )
+            if len(subnet_ids) != len(azs):
+                raise ValueError(
+                    f"private_subnet_ids has {len(subnet_ids)} entries but "
+                    f"availability_zones has {len(azs)}. Lengths must match."
+                )
+            if len(subnet_ids) < 2:
+                raise ValueError(
+                    "Provide at least 2 private subnet IDs in different AZs — "
+                    "the internal ALB requires multi-AZ for HA."
+                )
+            vpc = ec2.Vpc.from_vpc_attributes(
+                self,
+                "Vpc",
+                vpc_id=vpc_id,
+                availability_zones=azs,
+                private_subnet_ids=subnet_ids,
+            )
+            private_subnets = ec2.SubnetSelection(subnets=vpc.private_subnets)
+        else:
+            vpc = ec2.Vpc.from_lookup(self, "Vpc", vpc_id=vpc_id)
+            private_subnets = ec2.SubnetSelection(
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+            )
 
         # ── Secrets ─────────────────────────────────────────────────────
         django_secret = secretsmanager.Secret(
