@@ -18,12 +18,18 @@ Required context (set in cdk.json or via -c flags):
   - acm_cert_arn (optional): ACM cert in the same region for the ALB. If
                              empty, the ALB serves plain HTTP — fine for
                              initial smoke-testing on the corporate network.
+  - environment (optional) : 'prod', 'staging', etc. Defaults to 'prod'.
+                             Applied as a stack-level tag.
+  - tags (optional)        : JSON object of additional tags to apply
+                             stack-wide, e.g.
+                             -c tags='{"CostCenter":"4321","Owner":"AMS-IT"}'
 
 Outputs:
   - ALB DNS name (point your internal DNS CNAME at this)
   - Cognito IDs (UserPoolId, AppClientId) for the runbook
   - Cluster + service names for ``aws ecs run-task`` commands
 """
+import json
 from pathlib import Path
 
 import aws_cdk as cdk
@@ -59,6 +65,26 @@ class AmsDashboardStack(cdk.Stack):
                 "shared VPC the app should live in."
             )
         cert_arn = self.node.try_get_context("acm_cert_arn") or ""
+        environment = self.node.try_get_context("environment") or "prod"
+        extra_tags_raw = self.node.try_get_context("tags") or "{}"
+        try:
+            extra_tags = json.loads(extra_tags_raw) if isinstance(extra_tags_raw, str) else extra_tags_raw
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Invalid JSON in 'tags' context: {e}. Example: "
+                "-c tags='{\"CostCenter\":\"4321\",\"Owner\":\"AMS-IT\"}'"
+            ) from e
+        if not isinstance(extra_tags, dict):
+            raise ValueError("'tags' context must be a JSON object of key→value strings.")
+
+        # ── Stack-wide tags (propagate to all taggable resources) ───────
+        default_tags = {
+            "Application": "ams-dashboard",
+            "Environment": environment,
+            "ManagedBy": "CDK",
+        }
+        for key, value in {**default_tags, **{k: str(v) for k, v in extra_tags.items()}}.items():
+            cdk.Tags.of(self).add(key, value)
 
         # ── Networking ──────────────────────────────────────────────────
         vpc = ec2.Vpc.from_lookup(self, "Vpc", vpc_id=vpc_id)

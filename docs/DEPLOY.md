@@ -27,6 +27,28 @@ Information needed from your platform / security teams before first deploy:
 | AWS region | `cdk deploy -c region=…` (or `CDK_DEFAULT_REGION`) |
 | ACM certificate ARN (optional for first deploy) | `cdk deploy -c acm_cert_arn=arn:aws:acm:…` |
 | Internal DNS name to CNAME at the ALB | DNS is provisioned outside CDK; deploy outputs the ALB DNS name to point at |
+| Environment label (`prod`, `staging`, …) | `cdk deploy -c environment=prod` (default: `prod`) |
+| Company-specific tags (CostCenter, Owner, etc.) | `cdk deploy -c tags='{"CostCenter":"4321","Owner":"AMS-IT"}'` |
+
+### Tagging
+
+The stack applies these tags to every taggable resource by default:
+
+| Tag | Value |
+|---|---|
+| `Application` | `ams-dashboard` |
+| `Environment` | from `-c environment=…` (default `prod`) |
+| `ManagedBy` | `CDK` |
+
+To layer in your company's tagging requirements, pass a JSON object via
+the `tags` context — values are applied stack-wide and override defaults
+on key collision:
+
+```bash
+cdk deploy \
+  -c vpc_id=vpc-XXXXXXXX \
+  -c tags='{"CostCenter":"4321","Owner":"AMS-IT","DataClass":"Internal","Compliance":"None"}'
+```
 
 If `acm_cert_arn` is omitted, the ALB serves plain HTTP for the initial
 smoke-test. Add the cert and re-deploy for HTTPS.
