@@ -70,7 +70,6 @@ export function CustomerDetailPage() {
       </div>
 
       <DetailsSection org={org} onUpdated={setOrg} />
-      <SmesSection org={org} />
       <CustomerSystemsSection orgId={id} />
       <UsersSection orgId={id} users={users} onUsersChanged={setUsers} />
       <CustomerAnalyticsSection orgId={id} />
@@ -161,6 +160,30 @@ function DetailsSection({
         </Field>
         <Field label="Documents" wide>
           <DocumentsField org={org} onChanged={onUpdated} />
+        </Field>
+        <Field label={`SMEs${org.sme_staff.length ? ` (${org.sme_staff.length})` : ''}`} wide>
+          {org.sme_staff.length === 0 ? (
+            <span className="meta">
+              None assigned. Set in the Staff panel.
+            </span>
+          ) : (
+            <div className="sme-inline">
+              {org.sme_staff.map((s) => (
+                <span key={s.id} className="sme-chip">
+                  {s.email ? (
+                    <a href={`mailto:${s.email}`}>{s.name}</a>
+                  ) : (
+                    <strong>{s.name}</strong>
+                  )}
+                  {s.phone && (
+                    <a className="meta" href={`tel:${s.phone}`}>
+                      {formatPhone(s.phone)}
+                    </a>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
         </Field>
         <Field label="Notes" wide>
           <textarea
@@ -380,38 +403,6 @@ function DocumentsField({
         </div>
       )}
     </div>
-  )
-}
-
-function SmesSection({ org }: { org: Organization }) {
-  return (
-    <section className="detail-section">
-      <h3 className="section-title">SMEs</h3>
-      {org.sme_staff.length === 0 ? (
-        <div className="state-cell">
-          No staff assigned as SMEs for this customer. Assign in the Staff
-          panel.
-        </div>
-      ) : (
-        <div className="sme-list">
-          {org.sme_staff.map((s) => (
-            <div key={s.id} className="sme-row">
-              <strong>{s.name}</strong>
-              {s.email && (
-                <a href={`mailto:${s.email}`} className="meta">
-                  {s.email}
-                </a>
-              )}
-              {s.phone && (
-                <a href={`tel:${s.phone}`} className="meta">
-                  {formatPhone(s.phone)}
-                </a>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
   )
 }
 

@@ -551,29 +551,28 @@
   border-radius: var(--radius-md);
 }
 
-/* ── SMEs list (read-only contacts in the customer detail) ── */
-.sme-list {
+/* ── SMEs inline row inside Details (compact, name = mailto link) ── */
+.sme-inline {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 13px;
 }
-.sme-row {
-  display: flex;
+.sme-chip {
+  display: inline-flex;
   align-items: baseline;
-  gap: 12px;
-  padding: 6px 0;
-  border-bottom: 0.5px solid var(--color-border);
+  gap: 6px;
+  white-space: nowrap;
 }
-.sme-row:last-child {
-  border-bottom: none;
-}
-.sme-row a {
-  color: var(--color-text-secondary);
+.sme-chip a {
   text-decoration: none;
-}
-.sme-row a:hover {
   color: var(--color-text-primary);
+}
+.sme-chip a:hover {
   text-decoration: underline;
+}
+.sme-chip .meta {
+  font-family: ui-monospace, Consolas, monospace;
 }
 
 /* ── Errors ── */
