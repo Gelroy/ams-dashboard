@@ -52,17 +52,10 @@ export function CustomerAnalyticsSection({ orgId }: Props) {
     refresh()
   }, [orgId])
 
-  if (loading)
-    return (
-      <section className="detail-section">
-        <h3 className="section-title">Analytics</h3>
-        <div className="state-cell">Loading…</div>
-      </section>
-    )
+  if (loading) return <div className="state-cell">Loading…</div>
 
   return (
-    <section className="detail-section">
-      <h3 className="section-title">Analytics</h3>
+    <>
       {error && <div className="error-banner">{error}</div>}
 
       {items.length === 0 && (
@@ -81,7 +74,7 @@ export function CustomerAnalyticsSection({ orgId }: Props) {
         existing={items}
         onAdded={refresh}
       />
-    </section>
+    </>
   )
 }
 

@@ -69,11 +69,56 @@ export function CustomerDetailPage() {
         </span>
       </div>
 
-      <DetailsSection org={org} onUpdated={setOrg} />
-      <CustomerSystemsSection orgId={id} />
-      <UsersSection orgId={id} users={users} onUsersChanged={setUsers} />
-      <CustomerAnalyticsSection orgId={id} />
+      <CollapsibleSection title="Details">
+        <DetailsSection org={org} onUpdated={setOrg} />
+      </CollapsibleSection>
+      <CollapsibleSection title="Customer Systems">
+        <CustomerSystemsSection orgId={id} />
+      </CollapsibleSection>
+      <CollapsibleSection title="Users">
+        <UsersSection orgId={id} users={users} onUsersChanged={setUsers} />
+      </CollapsibleSection>
+      <CollapsibleSection title="Analytics">
+        <CustomerAnalyticsSection orgId={id} />
+      </CollapsibleSection>
     </div>
+  )
+}
+
+function CollapsibleSection({
+  title,
+  defaultOpen = true,
+  children,
+}: {
+  title: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <section className="detail-section collapsible">
+      <div
+        className="section-header"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setOpen(!open)
+          }
+        }}
+      >
+        <span className={open ? 'chevron-btn open' : 'chevron-btn'}>
+          {open ? '▼' : '▶'}
+        </span>
+        <h3 className="section-title">{title}</h3>
+      </div>
+      <div className="section-body" style={{ display: open ? 'block' : 'none' }}>
+        {children}
+      </div>
+    </section>
   )
 }
 
@@ -111,8 +156,7 @@ function DetailsSection({
   }
 
   return (
-    <section className="detail-section">
-      <h3 className="section-title">Details</h3>
+    <>
       <div className="form-grid">
         <Field label="Company Name (override)">
           <input
@@ -214,7 +258,7 @@ function DetailsSection({
         {savedAt && !saving && <span className="saved-indicator">Saved</span>}
         {saveError && <span className="error-text">{saveError}</span>}
       </div>
-    </section>
+    </>
   )
 }
 
@@ -438,8 +482,7 @@ function UsersSection({
   }
 
   return (
-    <section className="detail-section">
-      <h3 className="section-title">Users</h3>
+    <>
       {error && <div className="error-banner">{error}</div>}
       {users.length === 0 ? (
         <div className="state-cell">
@@ -498,7 +541,7 @@ function UsersSection({
           </table>
         </div>
       )}
-    </section>
+    </>
   )
 }
 

@@ -253,6 +253,25 @@
   margin: 0 0 1rem;
   color: var(--color-text-primary);
 }
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.section-header .section-title {
+  margin: 0;
+}
+.section-header:hover .section-title {
+  color: var(--color-text-secondary);
+}
+.section-header .chevron-btn {
+  font-size: 10px;
+}
+.detail-section.collapsible .section-body {
+  margin-top: 1rem;
+}
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
