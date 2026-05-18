@@ -541,17 +541,14 @@
   align-items: center;
   gap: 8px;
 }
-.documents-manage {
+.documents-form {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-top: 6px;
-  border-top: 0.5px dashed var(--color-border);
-}
-.documents-edit-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--color-bg-secondary);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-md);
 }
 
 /* ── Errors ── */

@@ -16,7 +16,6 @@ import type {
   AmsLevel,
   EditableOrgFields,
   Organization,
-  OrgDocument,
   OrgUser,
   ZabbixStatus,
 } from '../types'
@@ -195,6 +194,8 @@ function DetailsSection({
   )
 }
 
+type DocsMode = 'view' | 'edit' | 'add'
+
 function DocumentsField({
   org,
   onChanged,
@@ -204,39 +205,108 @@ function DocumentsField({
 }) {
   const docs = org.documents
   const [selectedId, setSelectedId] = useState<string>(docs[0]?.id ?? '')
+  const [mode, setMode] = useState<DocsMode>('view')
+  const [formDescription, setFormDescription] = useState('')
+  const [formUrl, setFormUrl] = useState('')
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const selected = docs.find((d) => d.id === selectedId) ?? docs[0]
 
   const refresh = async () => {
     const fresh = await getOrganization(org.id)
     onChanged(fresh)
   }
 
-  const selected = docs.find((d) => d.id === selectedId) ?? docs[0]
-
   const open = () => {
     if (!selected) return
     window.open(selected.url, '_blank', 'noopener,noreferrer')
   }
 
-  const handle = (fn: () => Promise<unknown>) => {
+  const startEdit = () => {
+    if (!selected) return
+    setFormDescription(selected.description)
+    setFormUrl(selected.url)
     setError(null)
-    fn()
-      .then(refresh)
-      .catch((e: Error) => setError(e.message))
+    setMode('edit')
+  }
+
+  const startAdd = () => {
+    setFormDescription('')
+    setFormUrl('')
+    setError(null)
+    setMode('add')
+  }
+
+  const closeForm = () => {
+    setMode('view')
+    setError(null)
+  }
+
+  const submitDone = async () => {
+    const description = formDescription.trim()
+    const url = formUrl.trim()
+    if (!description || !url) return
+    setBusy(true)
+    setError(null)
+    try {
+      if (mode === 'edit' && selected) {
+        await updateOrgDocument(org.id, selected.id, { description, url })
+      } else if (mode === 'add') {
+        const created = await createOrgDocument(org.id, {
+          description,
+          url,
+          position: docs.length,
+        })
+        setSelectedId(created.id)
+      }
+      await refresh()
+      closeForm()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const submitDelete = async () => {
+    if (mode === 'add') {
+      // Nothing persisted yet — just discard the form.
+      closeForm()
+      return
+    }
+    if (!selected) return
+    if (!window.confirm(`Delete "${selected.description}"?`)) return
+    setBusy(true)
+    setError(null)
+    try {
+      await deleteOrgDocument(org.id, selected.id)
+      await refresh()
+      // Select the next remaining doc, if any.
+      const remaining = docs.filter((d) => d.id !== selected.id)
+      setSelectedId(remaining[0]?.id ?? '')
+      closeForm()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
     <div className="documents-field">
       <div className="documents-row">
-        {docs.length === 0 ? (
-          <span className="meta">No documents yet — add one below.</span>
-        ) : (
+        {docs.length > 0 && (
           <>
             <select
               className="input"
               style={{ minWidth: 240 }}
               value={selected?.id ?? ''}
-              onChange={(e) => setSelectedId(e.target.value)}
+              onChange={(e) => {
+                setSelectedId(e.target.value)
+                if (mode !== 'view') closeForm()
+              }}
+              disabled={mode !== 'view'}
             >
               {docs.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -244,145 +314,70 @@ function DocumentsField({
                 </option>
               ))}
             </select>
-            <button className="btn" onClick={open} disabled={!selected}>
+            <button className="btn" onClick={open} disabled={!selected || mode !== 'view'}>
               Open
+            </button>
+            <button
+              className={mode === 'edit' ? 'btn btn-primary' : 'btn'}
+              onClick={mode === 'edit' ? closeForm : startEdit}
+              disabled={!selected || mode === 'add'}
+            >
+              Edit
             </button>
           </>
         )}
+        {docs.length === 0 && <span className="meta">No documents yet.</span>}
+        <button
+          className={mode === 'add' ? 'btn btn-primary' : 'btn'}
+          onClick={mode === 'add' ? closeForm : startAdd}
+          disabled={mode === 'edit'}
+        >
+          Add
+        </button>
       </div>
 
-      <div className="documents-manage">
-        {docs.map((doc) => (
-          <DocumentRow
-            key={doc.id}
-            orgId={org.id}
-            doc={doc}
-            onPatch={(patch) =>
-              handle(() => updateOrgDocument(org.id, doc.id, patch))
-            }
-            onDelete={() => {
-              if (window.confirm(`Delete "${doc.description}"?`))
-                handle(() => deleteOrgDocument(org.id, doc.id))
-            }}
-          />
-        ))}
-        <AddDocumentRow
-          orgId={org.id}
-          nextPosition={docs.length}
-          onAdded={(payload) =>
-            handle(() =>
-              createOrgDocument(org.id, payload).then((doc) => {
-                setSelectedId(doc.id)
-              }),
-            )
-          }
-        />
-        {error && <div className="error-text">{error}</div>}
-      </div>
-    </div>
-  )
-}
-
-function DocumentRow({
-  orgId: _orgId,
-  doc,
-  onPatch,
-  onDelete,
-}: {
-  orgId: string
-  doc: OrgDocument
-  onPatch: (patch: Partial<OrgDocument>) => void
-  onDelete: () => void
-}) {
-  const [description, setDescription] = useState(doc.description)
-  const [url, setUrl] = useState(doc.url)
-  return (
-    <div className="documents-edit-row">
-      <input
-        className="input compact"
-        style={{ flex: 1 }}
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        onBlur={() => {
-          if (description.trim() && description !== doc.description) {
-            onPatch({ description: description.trim() })
-          } else if (!description.trim()) {
-            setDescription(doc.description)
-          }
-        }}
-      />
-      <input
-        className="input compact"
-        style={{ flex: 2 }}
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        onBlur={() => {
-          if (url.trim() && url !== doc.url) {
-            onPatch({ url: url.trim() })
-          } else if (!url.trim()) {
-            setUrl(doc.url)
-          }
-        }}
-      />
-      <button className="btn-icon" onClick={onDelete} title="Delete">
-        ×
-      </button>
-    </div>
-  )
-}
-
-function AddDocumentRow({
-  orgId: _orgId,
-  nextPosition,
-  onAdded,
-}: {
-  orgId: string
-  nextPosition: number
-  onAdded: (payload: { description: string; url: string; position: number }) => void
-}) {
-  const [description, setDescription] = useState('')
-  const [url, setUrl] = useState('')
-
-  const submit = () => {
-    if (!description.trim() || !url.trim()) return
-    onAdded({
-      description: description.trim(),
-      url: url.trim(),
-      position: nextPosition,
-    })
-    setDescription('')
-    setUrl('')
-  }
-
-  return (
-    <div className="documents-edit-row">
-      <input
-        className="input compact"
-        style={{ flex: 1 }}
-        placeholder="Description"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') submit()
-        }}
-      />
-      <input
-        className="input compact"
-        style={{ flex: 2 }}
-        placeholder="https://…"
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') submit()
-        }}
-      />
-      <button
-        className="btn"
-        disabled={!description.trim() || !url.trim()}
-        onClick={submit}
-      >
-        + Add
-      </button>
+      {mode !== 'view' && (
+        <div className="documents-form">
+          <div className="field">
+            <div className="field-label">Description</div>
+            <input
+              className="input"
+              value={formDescription}
+              autoFocus
+              onChange={(e) => setFormDescription(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitDone()
+              }}
+            />
+          </div>
+          <div className="field">
+            <div className="field-label">URL</div>
+            <input
+              className="input"
+              type="url"
+              placeholder="https://…"
+              value={formUrl}
+              onChange={(e) => setFormUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitDone()
+              }}
+            />
+          </div>
+          <div className="form-actions">
+            <button
+              className="btn btn-primary"
+              disabled={busy || !formDescription.trim() || !formUrl.trim()}
+              onClick={submitDone}
+            >
+              Done
+            </button>
+            <button className="btn" disabled={busy} onClick={submitDelete}>
+              Delete
+            </button>
+            {error && <span className="error-text">{error}</span>}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
