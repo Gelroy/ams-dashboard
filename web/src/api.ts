@@ -5,6 +5,7 @@ import type {
   EditableUserFields,
   Environment,
   Organization,
+  OrgDocument,
   OrgUser,
   Paginated,
   Server,
@@ -73,6 +74,36 @@ export function updateOrganization(
 
 export function listOrgUsers(orgId: string): Promise<Paginated<OrgUser>> {
   return request<Paginated<OrgUser>>(`/organizations/${orgId}/users/`)
+}
+
+// Per-customer document links
+export function createOrgDocument(
+  orgId: string,
+  payload: { description: string; url: string; position?: number },
+): Promise<OrgDocument> {
+  return request<OrgDocument>(`/organizations/${orgId}/documents/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateOrgDocument(
+  orgId: string,
+  documentId: string,
+  patch: Partial<Pick<OrgDocument, 'description' | 'url' | 'position'>>,
+): Promise<OrgDocument> {
+  return request<OrgDocument>(`/organizations/${orgId}/documents/${documentId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deleteOrgDocument(orgId: string, documentId: string): Promise<void> {
+  return fetch(`/api/organizations/${orgId}/documents/${documentId}/`, {
+    method: 'DELETE',
+  }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  })
 }
 
 export function updateOrgUser(

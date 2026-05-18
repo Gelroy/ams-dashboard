@@ -1,10 +1,18 @@
 from rest_framework import serializers
 
-from .models import Environment, Organization, OrgUser, Server
+from .models import Environment, Organization, OrgDocument, OrgUser, Server
+
+
+class OrgDocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OrgDocument
+        fields = ["id", "organization", "description", "url", "position"]
+        read_only_fields = ["id", "organization"]
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
     display_name = serializers.CharField(read_only=True)
+    documents = OrgDocumentSerializer(many=True, read_only=True)
     needs_patching = serializers.SerializerMethodField()
 
     class Meta:
@@ -18,12 +26,12 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "ams_level",
             "zabbix_status",
             "help_desk_phone",
-            "connection_guide_url",
             "notes",
             "open_ticket_count",
             "ticket_count_synced_at",
             "last_ticket_sync_error",
             "jira_synced_at",
+            "documents",
             "needs_patching",
         ]
         read_only_fields = [
@@ -31,6 +39,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "jira_org_id",
             "jira_name",
             "display_name",
+            "documents",
             "open_ticket_count",
             "ticket_count_synced_at",
             "last_ticket_sync_error",

@@ -46,7 +46,6 @@ class Organization(SoftDeleteModel):
         max_length=8, choices=ZabbixStatus.choices, null=True, blank=True
     )
     help_desk_phone = models.TextField(null=True, blank=True)
-    connection_guide_url = models.TextField(null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
     open_ticket_count = models.IntegerField(null=True, blank=True)
     ticket_count_synced_at = models.DateTimeField(null=True, blank=True)
@@ -78,6 +77,36 @@ class Organization(SoftDeleteModel):
     @property
     def display_name(self) -> str:
         return self.local_name or self.jira_name
+
+
+class OrgDocument(SoftDeleteModel):
+    """A named link to a per-customer document — replaces the legacy single
+    connection_guide_url field. Description shows in the dropdown; URL is
+    what the Open button opens."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="documents"
+    )
+    description = models.TextField()
+    url = models.TextField()
+    position = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "org_documents"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "description"],
+                condition=Q(deleted_at__isnull=True),
+                name="org_documents_org_description_unique",
+            ),
+        ]
+        ordering = ["position", "description"]
+
+    def __str__(self):
+        return self.description
 
 
 class OrgUser(SoftDeleteModel):

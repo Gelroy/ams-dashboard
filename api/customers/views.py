@@ -4,10 +4,11 @@ from django.utils import timezone
 from django_filters import rest_framework as filters
 from rest_framework import mixins, viewsets
 
-from .models import Environment, Organization, OrgUser, Server
+from .models import Environment, Organization, OrgDocument, OrgUser, Server
 from .serializers import (
     EnvironmentSerializer,
     OrganizationSerializer,
+    OrgDocumentSerializer,
     OrgUserSerializer,
     ServerSerializer,
 )
@@ -71,6 +72,19 @@ class EnvironmentViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         return Environment.objects.filter(organization_id=self.kwargs["organization_pk"])
+
+    def perform_create(self, serializer):
+        serializer.save(organization_id=self.kwargs["organization_pk"])
+
+
+class OrgDocumentViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
+    """Per-customer (description, URL) document links."""
+
+    serializer_class = OrgDocumentSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        return OrgDocument.objects.filter(organization_id=self.kwargs["organization_pk"])
 
     def perform_create(self, serializer):
         serializer.save(organization_id=self.kwargs["organization_pk"])

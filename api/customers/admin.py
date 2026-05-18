@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Environment, Organization, OrgUser, Server
+from .models import Environment, Organization, OrgDocument, OrgUser, Server
 
 
 @admin.register(Organization)
@@ -9,6 +9,12 @@ class OrganizationAdmin(admin.ModelAdmin):
     list_filter = ("ams_level", "zabbix_status")
     search_fields = ("jira_name", "local_name", "jira_org_id")
     readonly_fields = ("id", "jira_org_id", "jira_synced_at", "created_at", "updated_at")
+
+
+@admin.register(OrgDocument)
+class OrgDocumentAdmin(admin.ModelAdmin):
+    list_display = ("organization", "description", "url", "position")
+    search_fields = ("description", "url", "organization__jira_name")
 
 
 @admin.register(OrgUser)

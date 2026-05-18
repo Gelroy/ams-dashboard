@@ -1,6 +1,14 @@
 export type AmsLevel = 'Essential' | 'Enhanced' | 'Expert'
 export type ZabbixStatus = 'Good' | 'Issue'
 
+export interface OrgDocument {
+  id: string
+  organization: string
+  description: string
+  url: string
+  position: number
+}
+
 export interface Organization {
   id: string
   jira_org_id: string
@@ -10,12 +18,12 @@ export interface Organization {
   ams_level: AmsLevel | null
   zabbix_status: ZabbixStatus | null
   help_desk_phone: string | null
-  connection_guide_url: string | null
   notes: string | null
   open_ticket_count: number | null
   ticket_count_synced_at: string | null
   last_ticket_sync_error: string | null
   jira_synced_at: string | null
+  documents: OrgDocument[]
   needs_patching: NeedsPatchingStatus
 }
 
@@ -39,12 +47,7 @@ export interface Paginated<T> {
 
 export type EditableOrgFields = Pick<
   Organization,
-  | 'local_name'
-  | 'ams_level'
-  | 'zabbix_status'
-  | 'help_desk_phone'
-  | 'connection_guide_url'
-  | 'notes'
+  'local_name' | 'ams_level' | 'zabbix_status' | 'help_desk_phone' | 'notes'
 >
 
 export type EditableUserFields = Pick<OrgUser, 'role' | 'alerts_enabled' | 'is_primary'>

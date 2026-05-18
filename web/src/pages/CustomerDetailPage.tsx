@@ -1,10 +1,25 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { getOrganization, listOrgUsers, updateOrganization, updateOrgUser } from '../api'
+import {
+  createOrgDocument,
+  deleteOrgDocument,
+  getOrganization,
+  listOrgUsers,
+  updateOrganization,
+  updateOrgDocument,
+  updateOrgUser,
+} from '../api'
 import { CustomerAnalyticsSection } from '../components/CustomerAnalyticsSection'
 import { CustomerSystemsSection } from '../components/CustomerSystemsSection'
-import type { AmsLevel, EditableOrgFields, Organization, OrgUser, ZabbixStatus } from '../types'
+import type {
+  AmsLevel,
+  EditableOrgFields,
+  Organization,
+  OrgDocument,
+  OrgUser,
+  ZabbixStatus,
+} from '../types'
 
 const AMS_LEVELS: AmsLevel[] = ['Essential', 'Enhanced', 'Expert']
 const ZABBIX_STATUSES: ZabbixStatus[] = ['Good', 'Issue']
@@ -75,7 +90,6 @@ function DetailsSection({
     ams_level: org.ams_level,
     zabbix_status: org.zabbix_status,
     help_desk_phone: org.help_desk_phone,
-    connection_guide_url: org.connection_guide_url,
     notes: org.notes,
   })
   const [saving, setSaving] = useState(false)
@@ -145,14 +159,8 @@ function DetailsSection({
             onChange={(e) => set('help_desk_phone', e.target.value || null)}
           />
         </Field>
-        <Field label="Connection Guide URL" wide>
-          <input
-            className="input"
-            type="url"
-            value={draft.connection_guide_url ?? ''}
-            placeholder="https://…"
-            onChange={(e) => set('connection_guide_url', e.target.value || null)}
-          />
+        <Field label="Documents" wide>
+          <DocumentsField org={org} onChanged={onUpdated} />
         </Field>
         <Field label="Notes" wide>
           <textarea
@@ -184,6 +192,198 @@ function DetailsSection({
         {saveError && <span className="error-text">{saveError}</span>}
       </div>
     </section>
+  )
+}
+
+function DocumentsField({
+  org,
+  onChanged,
+}: {
+  org: Organization
+  onChanged: (o: Organization) => void
+}) {
+  const docs = org.documents
+  const [selectedId, setSelectedId] = useState<string>(docs[0]?.id ?? '')
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = async () => {
+    const fresh = await getOrganization(org.id)
+    onChanged(fresh)
+  }
+
+  const selected = docs.find((d) => d.id === selectedId) ?? docs[0]
+
+  const open = () => {
+    if (!selected) return
+    window.open(selected.url, '_blank', 'noopener,noreferrer')
+  }
+
+  const handle = (fn: () => Promise<unknown>) => {
+    setError(null)
+    fn()
+      .then(refresh)
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <div className="documents-field">
+      <div className="documents-row">
+        {docs.length === 0 ? (
+          <span className="meta">No documents yet — add one below.</span>
+        ) : (
+          <>
+            <select
+              className="input"
+              style={{ minWidth: 240 }}
+              value={selected?.id ?? ''}
+              onChange={(e) => setSelectedId(e.target.value)}
+            >
+              {docs.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.description}
+                </option>
+              ))}
+            </select>
+            <button className="btn" onClick={open} disabled={!selected}>
+              Open
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="documents-manage">
+        {docs.map((doc) => (
+          <DocumentRow
+            key={doc.id}
+            orgId={org.id}
+            doc={doc}
+            onPatch={(patch) =>
+              handle(() => updateOrgDocument(org.id, doc.id, patch))
+            }
+            onDelete={() => {
+              if (window.confirm(`Delete "${doc.description}"?`))
+                handle(() => deleteOrgDocument(org.id, doc.id))
+            }}
+          />
+        ))}
+        <AddDocumentRow
+          orgId={org.id}
+          nextPosition={docs.length}
+          onAdded={(payload) =>
+            handle(() =>
+              createOrgDocument(org.id, payload).then((doc) => {
+                setSelectedId(doc.id)
+              }),
+            )
+          }
+        />
+        {error && <div className="error-text">{error}</div>}
+      </div>
+    </div>
+  )
+}
+
+function DocumentRow({
+  orgId: _orgId,
+  doc,
+  onPatch,
+  onDelete,
+}: {
+  orgId: string
+  doc: OrgDocument
+  onPatch: (patch: Partial<OrgDocument>) => void
+  onDelete: () => void
+}) {
+  const [description, setDescription] = useState(doc.description)
+  const [url, setUrl] = useState(doc.url)
+  return (
+    <div className="documents-edit-row">
+      <input
+        className="input compact"
+        style={{ flex: 1 }}
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        onBlur={() => {
+          if (description.trim() && description !== doc.description) {
+            onPatch({ description: description.trim() })
+          } else if (!description.trim()) {
+            setDescription(doc.description)
+          }
+        }}
+      />
+      <input
+        className="input compact"
+        style={{ flex: 2 }}
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        onBlur={() => {
+          if (url.trim() && url !== doc.url) {
+            onPatch({ url: url.trim() })
+          } else if (!url.trim()) {
+            setUrl(doc.url)
+          }
+        }}
+      />
+      <button className="btn-icon" onClick={onDelete} title="Delete">
+        ×
+      </button>
+    </div>
+  )
+}
+
+function AddDocumentRow({
+  orgId: _orgId,
+  nextPosition,
+  onAdded,
+}: {
+  orgId: string
+  nextPosition: number
+  onAdded: (payload: { description: string; url: string; position: number }) => void
+}) {
+  const [description, setDescription] = useState('')
+  const [url, setUrl] = useState('')
+
+  const submit = () => {
+    if (!description.trim() || !url.trim()) return
+    onAdded({
+      description: description.trim(),
+      url: url.trim(),
+      position: nextPosition,
+    })
+    setDescription('')
+    setUrl('')
+  }
+
+  return (
+    <div className="documents-edit-row">
+      <input
+        className="input compact"
+        style={{ flex: 1 }}
+        placeholder="Description"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') submit()
+        }}
+      />
+      <input
+        className="input compact"
+        style={{ flex: 2 }}
+        placeholder="https://…"
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') submit()
+        }}
+      />
+      <button
+        className="btn"
+        disabled={!description.trim() || !url.trim()}
+        onClick={submit}
+      >
+        + Add
+      </button>
+    </div>
   )
 }
 
