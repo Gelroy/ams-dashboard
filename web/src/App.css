@@ -551,6 +551,31 @@
   border-radius: var(--radius-md);
 }
 
+/* ── SMEs list (read-only contacts in the customer detail) ── */
+.sme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sme-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 0.5px solid var(--color-border);
+}
+.sme-row:last-child {
+  border-bottom: none;
+}
+.sme-row a {
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+.sme-row a:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
 /* ── Errors ── */
 .error-banner {
   margin-bottom: 1rem;

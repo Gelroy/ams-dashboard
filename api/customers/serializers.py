@@ -13,6 +13,7 @@ class OrgDocumentSerializer(serializers.ModelSerializer):
 class OrganizationSerializer(serializers.ModelSerializer):
     display_name = serializers.CharField(read_only=True)
     documents = OrgDocumentSerializer(many=True, read_only=True)
+    sme_staff = serializers.SerializerMethodField()
     needs_patching = serializers.SerializerMethodField()
 
     class Meta:
@@ -32,6 +33,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "last_ticket_sync_error",
             "jira_synced_at",
             "documents",
+            "sme_staff",
             "needs_patching",
         ]
         read_only_fields = [
@@ -40,11 +42,20 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "jira_name",
             "display_name",
             "documents",
+            "sme_staff",
             "open_ticket_count",
             "ticket_count_synced_at",
             "last_ticket_sync_error",
             "jira_synced_at",
             "needs_patching",
+        ]
+
+    def get_sme_staff(self, obj):
+        # obj.sme_staff is the reverse manager set by Staff.sme_organizations.
+        # Filter out soft-deleted staff rows; expose only contact-card fields.
+        return [
+            {"id": str(s.id), "name": s.name, "email": s.email, "phone": s.phone}
+            for s in obj.sme_staff.filter(deleted_at__isnull=True).order_by("name")
         ]
 
     def get_needs_patching(self, obj):

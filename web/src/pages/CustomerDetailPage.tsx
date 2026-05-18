@@ -70,6 +70,7 @@ export function CustomerDetailPage() {
       </div>
 
       <DetailsSection org={org} onUpdated={setOrg} />
+      <SmesSection org={org} />
       <CustomerSystemsSection orgId={id} />
       <UsersSection orgId={id} users={users} onUsersChanged={setUsers} />
       <CustomerAnalyticsSection orgId={id} />
@@ -380,6 +381,44 @@ function DocumentsField({
       )}
     </div>
   )
+}
+
+function SmesSection({ org }: { org: Organization }) {
+  return (
+    <section className="detail-section">
+      <h3 className="section-title">SMEs</h3>
+      {org.sme_staff.length === 0 ? (
+        <div className="state-cell">
+          No staff assigned as SMEs for this customer. Assign in the Staff
+          panel.
+        </div>
+      ) : (
+        <div className="sme-list">
+          {org.sme_staff.map((s) => (
+            <div key={s.id} className="sme-row">
+              <strong>{s.name}</strong>
+              {s.email && (
+                <a href={`mailto:${s.email}`} className="meta">
+                  {s.email}
+                </a>
+              )}
+              {s.phone && (
+                <a href={`tel:${s.phone}`} className="meta">
+                  {formatPhone(s.phone)}
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function formatPhone(raw: string): string {
+  const d = raw.replace(/\D/g, '')
+  if (d.length === 10) return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`
+  return raw
 }
 
 function UsersSection({

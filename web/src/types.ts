@@ -9,6 +9,13 @@ export interface OrgDocument {
   position: number
 }
 
+export interface SmeStaffRef {
+  id: string
+  name: string
+  email: string | null
+  phone: string | null
+}
+
 export interface Organization {
   id: string
   jira_org_id: string
@@ -24,6 +31,7 @@ export interface Organization {
   last_ticket_sync_error: string | null
   jira_synced_at: string | null
   documents: OrgDocument[]
+  sme_staff: SmeStaffRef[]
   needs_patching: NeedsPatchingStatus
 }
 
