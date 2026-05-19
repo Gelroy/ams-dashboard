@@ -98,7 +98,7 @@ pip install -r requirements.txt
 cdk bootstrap aws://<ACCOUNT>/<REGION>
 ```
 
-### Alternative: bootstrap via pure AWS CLI (no CDK needed admin-side)
+### Alternative #1: bootstrap via AWS CLI + a CloudFormation template
 
 When the admin can't or won't install Node + the CDK CLI, the repo
 includes a script that does the same job using only AWS CLI calls
@@ -112,6 +112,42 @@ cd ams-dashboard
 # Example:
 ./infra/scripts/admin-bootstrap-cli.sh 048189774358 us-west-2
 ```
+
+### Alternative #2: bootstrap with raw AWS CLI calls (no CloudFormation at all)
+
+When CloudFormation itself is off the table — for example, the admin's
+permissions or org policy don't allow CFN stack creation — every
+resource can be created with direct `aws iam` / `aws s3api` / `aws ecr`
+/ `aws kms` / `aws ssm` calls instead. The repo ships a script that
+runs each call in order:
+
+```bash
+./infra/scripts/admin-bootstrap-raw-cli.sh <ACCOUNT_ID> <REGION>
+
+# Example:
+./infra/scripts/admin-bootstrap-raw-cli.sh 048189774358 us-west-2
+```
+
+It creates (and prints, as it goes):
+
+1. The 5 IAM roles (`file-publishing`, `image-publishing`, `lookup`,
+   `cfn-exec`, `deploy`) with trust + permission policies.
+2. A KMS key + alias for assets-bucket encryption.
+3. The S3 staging bucket (versioning + SSE-KMS + public access block +
+   lifecycle + deny-non-SSL bucket policy).
+4. The ECR container-assets repository (immutable tags + lifecycle +
+   Lambda / EMR-Serverless pull policies).
+5. The `/cdk-bootstrap/<qualifier>/version` SSM parameter.
+
+The end state is identical to `cdk bootstrap` / the CFN-based script.
+The admin's principal needs `iam:CreateRole`, `iam:PutRolePolicy`,
+`iam:AttachRolePolicy`, `iam:TagRole`, `s3:CreateBucket` + bucket
+config actions, `ecr:CreateRepository` + policy actions, `kms:*` for
+key creation, `ssm:PutParameter`, plus a brief read on the created
+roles to fetch ARNs.
+
+Not idempotent — if the script fails partway through, delete the
+partially-created resources before retrying.
 
 The script:
 
