@@ -98,6 +98,44 @@ pip install -r requirements.txt
 cdk bootstrap aws://<ACCOUNT>/<REGION>
 ```
 
+### Alternative: bootstrap via pure AWS CLI (no CDK needed admin-side)
+
+When the admin can't or won't install Node + the CDK CLI, the repo
+includes a script that does the same job using only AWS CLI calls
+against a pre-generated CloudFormation template at
+`infra/bootstrap-template.yaml`:
+
+```bash
+cd ams-dashboard
+./infra/scripts/admin-bootstrap-cli.sh <ACCOUNT_ID> <REGION>
+
+# Example:
+./infra/scripts/admin-bootstrap-cli.sh 048189774358 us-west-2
+```
+
+The script:
+
+1. Creates CloudFormation stack `AmsDashboardCdkToolkit` from the
+   committed template.
+2. Waits for `CREATE_COMPLETE` (typically 2–4 minutes).
+3. Verifies the `/cdk-bootstrap/amsdash01/version` SSM marker exists.
+4. Lists the 5 IAM roles it created.
+
+The admin's credentials still need to be able to create IAM roles
++ S3 buckets + ECR repos + SSM parameters + CloudFormation stacks —
+CloudFormation itself does the heavy lifting; the admin's principal
+just needs to issue the `cloudformation:CreateStack` call with
+`CAPABILITY_NAMED_IAM` and pass the right service permissions
+through. `AdministratorAccess` is sufficient and is what CDK would
+have requested anyway.
+
+To regenerate `bootstrap-template.yaml` when the CDK version changes:
+
+```bash
+cd infra && source .venv/bin/activate
+cdk bootstrap --show-template > bootstrap-template.yaml
+```
+
 ### Grant the routine-deploy IAM principal its permissions
 
 After bootstrap, day-to-day `cdk deploy` only needs the ability to assume
