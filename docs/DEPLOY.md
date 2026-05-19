@@ -149,6 +149,66 @@ roles to fetch ARNs.
 Not idempotent — if the script fails partway through, delete the
 partially-created resources before retrying.
 
+### Permissions that can be revoked after initial setup
+
+Bootstrap and the first deploy require broad permissions; after that
+the same operations don't need them again. The admin can prune the
+following from whatever managed policy / SSO permission set / inline
+policy was used to run the bootstrap script:
+
+**Safe to revoke immediately after bootstrap completes**
+
+These are only used by `admin-bootstrap-raw-cli.sh` (or `cdk bootstrap`):
+
+| Permission | What used it |
+|---|---|
+| `iam:CreateRole`, `iam:DeleteRole` | Creating the 5 cdk-*-role-* IAM roles |
+| `iam:PutRolePolicy`, `iam:DeleteRolePolicy`, `iam:GetRolePolicy` | Attaching inline policies to those roles |
+| `iam:AttachRolePolicy`, `iam:DetachRolePolicy` | Attaching the AWS-managed `ReadOnlyAccess` and `AdministratorAccess` policies |
+| `iam:TagRole`, `iam:UntagRole`, `iam:GetRole` | Bootstrap-role tagging and ARN lookup |
+| `s3:CreateBucket`, `s3:PutBucketVersioning`, `s3:PutBucketPolicy`, `s3:PutBucketPublicAccessBlock`, `s3:PutEncryptionConfiguration`, `s3:PutLifecycleConfiguration` | Creating the cdk-amsdash01-assets-* staging bucket |
+| `ecr:CreateRepository`, `ecr:PutLifecyclePolicy`, `ecr:SetRepositoryPolicy` | Creating the cdk-amsdash01-container-assets-* repo |
+| `kms:CreateKey`, `kms:CreateAlias`, `kms:DescribeKey` | Creating the assets-bucket encryption key |
+| `ssm:PutParameter` | Writing the `/cdk-bootstrap/amsdash01/version` marker |
+
+Once bootstrap is done, those resources exist and don't need to be
+created again. The cdk-*-role-* roles are used at every subsequent
+deploy (`sts:AssumeRole` does that), but no further IAM-create perms
+are needed.
+
+**Needed for the first `cdk deploy` (running CloudFormation)**
+
+Initial stack creation runs entirely through `cdk-amsdash01-cfn-exec-role`,
+which has `AdministratorAccess`. So no extra admin perms are needed at
+deploy time — CloudFormation does the creating, not the admin or Ron.
+
+**Must remain (routine deploys + ongoing operation)**
+
+These are what Ron's user keeps via `grant-cdk-deploy-perms.sh`:
+
+- `sts:AssumeRole` on the four `cdk-amsdash01-*-role-*` roles
+- `ec2:Describe*` (VPCs, subnets, AZs, route tables, SGs, VPN GWs) — used by CDK at synth time for context lookups
+- `ssm:GetParameter*` on `/cdk-bootstrap/*` — every deploy reads the bootstrap version
+- `cloudformation:Describe*`/`GetTemplate`/`ListStackResources` scoped to the AmsDashboardStack and AmsDashboardCdkToolkit stacks
+
+**Ad-hoc operational permissions (grant on demand, then revoke)**
+
+| When | What | Why |
+|---|---|---|
+| Populating the JIRA secret first time, or rotating creds | `secretsmanager:PutSecretValue` on the JIRA secret ARN | One-off; revoke after each rotation |
+| Creating Cognito users for new team members | `cognito-idp:AdminCreateUser`, `AdminSetUserPassword` on the user pool | Periodic; can be granted to whoever onboards staff |
+| Running the migration task after a deploy | `ecs:RunTask` + `iam:PassRole` on the task roles, scoped to the migration task definition | Per deploy; Ron's principal would normally have this |
+| Re-bootstrap (e.g., new region) | Everything in the first table above | Reattach the bootstrap perms, run the script, revoke again |
+
+**TL;DR for the admin**
+
+After bootstrap succeeds and `cdk deploy` finishes once, drop all
+`iam:Create*`, `iam:Put*`, `iam:Attach*`, `s3:Create*`, `s3:Put*`,
+`ecr:Create*`, `kms:Create*`, and `ssm:PutParameter` perms from their
+own user. They never need them again unless you re-bootstrap a new
+account/region or rotate a secret. Ron's routine-deploy policy
+remains in place untouched.
+
 ### About the remaining `"Resource": "*"` entries
 
 Every IAM policy in the bootstrap and grant-perms scripts is scoped to
