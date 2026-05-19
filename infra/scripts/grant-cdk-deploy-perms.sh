@@ -83,7 +83,7 @@ POLICY_JSON=$(cat <<JSON
       ]
     },
     {
-      "Sid": "CdkContextLookups",
+      "Sid": "EC2ReadOnlyForContextLookups",
       "Effect": "Allow",
       "Action": [
         "ec2:DescribeVpcs",
@@ -91,14 +91,21 @@ POLICY_JSON=$(cat <<JSON
         "ec2:DescribeAvailabilityZones",
         "ec2:DescribeRouteTables",
         "ec2:DescribeSecurityGroups",
-        "ec2:DescribeVpnGateways",
-        "ssm:GetParameter",
-        "ssm:GetParameters"
+        "ec2:DescribeVpnGateways"
       ],
       "Resource": "*"
     },
     {
-      "Sid": "CloudFormationVisibility",
+      "Sid": "BootstrapVersionRead",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter",
+        "ssm:GetParameters"
+      ],
+      "Resource": "arn:aws:ssm:*:${ACCOUNT}:parameter/cdk-bootstrap/*"
+    },
+    {
+      "Sid": "AmsDashboardStackVisibility",
       "Effect": "Allow",
       "Action": [
         "cloudformation:DescribeStacks",
@@ -106,10 +113,12 @@ POLICY_JSON=$(cat <<JSON
         "cloudformation:DescribeStackResource",
         "cloudformation:DescribeStackResources",
         "cloudformation:GetTemplate",
-        "cloudformation:ListStacks",
         "cloudformation:ListStackResources"
       ],
-      "Resource": "*"
+      "Resource": [
+        "arn:aws:cloudformation:*:${ACCOUNT}:stack/AmsDashboardStack/*",
+        "arn:aws:cloudformation:*:${ACCOUNT}:stack/AmsDashboardCdkToolkit/*"
+      ]
     }
   ]
 }

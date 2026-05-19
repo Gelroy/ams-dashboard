@@ -149,6 +149,26 @@ roles to fetch ARNs.
 Not idempotent — if the script fails partway through, delete the
 partially-created resources before retrying.
 
+### About the remaining `"Resource": "*"` entries
+
+Every IAM policy in the bootstrap and grant-perms scripts is scoped to
+specific resource ARNs where AWS supports it. A few `"Resource": "*"`
+entries remain — each is either required by AWS or an intentional
+broad safeguard. The complete list:
+
+| Where | Statement | Why `*` is correct |
+|---|---|---|
+| `admin-bootstrap-raw-cli.sh` — KMS key policy | All statements | A KMS *key policy* is attached to one key; `*` always means "this key." It's the only valid form for key policies. |
+| `admin-bootstrap-raw-cli.sh` — image-publishing-role | `AuthToken` (`ecr:GetAuthorizationToken`) | AWS docs: "calls to this action ignore the resource argument." `*` is the only legal value. Push permissions on the actual repository are scoped to the repo ARN in the same policy. |
+| `admin-bootstrap-raw-cli.sh` — lookup-role | `DontReadSecrets` (Deny `kms:Decrypt`) | Intentional broad **Deny**. The role gets `ReadOnlyAccess` which includes `kms:Decrypt`; this deny strips that across all keys. Scoping a deny narrows the safeguard. |
+| `admin-bootstrap-raw-cli.sh` — deploy-role | `CliCallerIdentity` (`sts:GetCallerIdentity`) | The action has no resource form. `*` is required. |
+| `grant-cdk-deploy-perms.sh` | `EC2ReadOnlyForContextLookups` | `ec2:Describe*` actions don't support resource-level permissions; AWS requires `*`. |
+
+Everything else — S3, ECR push, KMS data-key operations, CloudFormation
+stack ops, SSM parameter reads, IAM `PassRole`, `sts:AssumeRole` — is
+constrained to the specific bucket / repo / stack / parameter / role
+ARNs we created.
+
 The script:
 
 1. Creates CloudFormation stack `AmsDashboardCdkToolkit` from the

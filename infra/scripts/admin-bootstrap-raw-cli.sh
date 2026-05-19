@@ -291,16 +291,19 @@ aws iam put-role-policy --role-name "$FILE_PUB_ROLE" \
   --policy-document "file://$TMPDIR/file-publish-perms.json"
 echo "    $FILE_PUB_ROLE  ← S3 + KMS"
 
+# ecr:GetAuthorizationToken does NOT support resource-level permissions
+# (AWS API: "calls to this action ignore the resource argument") — Resource:*
+# is the only valid form. Everything else is scoped to this exact repo.
 cat > "$TMPDIR/image-publish-perms.json" <<EOF
 {
   "Version":"2012-10-17",
   "Statement":[
     {
-      "Effect":"Allow",
+      "Sid":"PushToRepo","Effect":"Allow",
       "Action":["ecr:PutImage","ecr:InitiateLayerUpload","ecr:UploadLayerPart","ecr:CompleteLayerUpload","ecr:BatchCheckLayerAvailability","ecr:DescribeRepositories","ecr:DescribeImages","ecr:BatchGetImage","ecr:GetDownloadUrlForLayer"],
       "Resource":"arn:aws:ecr:${REGION}:${ACCOUNT}:repository/${REPO}"
     },
-    {"Effect":"Allow","Action":"ecr:GetAuthorizationToken","Resource":"*"}
+    {"Sid":"AuthToken","Effect":"Allow","Action":"ecr:GetAuthorizationToken","Resource":"*"}
   ]
 }
 EOF
@@ -309,6 +312,10 @@ aws iam put-role-policy --role-name "$IMG_PUB_ROLE" \
   --policy-document "file://$TMPDIR/image-publish-perms.json"
 echo "    $IMG_PUB_ROLE  ← ECR push"
 
+# Intentional broad Deny — the lookup role is granted ReadOnlyAccess
+# (a managed policy that includes kms:Decrypt). This deny narrows that
+# so the role can read most resources but never decrypt anything. A Deny
+# should be broad by design; scoping it would defeat the safeguard.
 cat > "$TMPDIR/lookup-deny-secrets.json" <<EOF
 {"Version":"2012-10-17","Statement":[{"Sid":"DontReadSecrets","Effect":"Deny","Action":"kms:Decrypt","Resource":"*"}]}
 EOF
@@ -318,19 +325,33 @@ aws iam put-role-policy --role-name "$LOOKUP_ROLE" \
 echo "    $LOOKUP_ROLE   ← Deny kms:Decrypt (DontReadSecrets)"
 
 SSM_PARAM_ARN="arn:aws:ssm:${REGION}:${ACCOUNT}:parameter/cdk-bootstrap/${QUALIFIER}/version"
+# CloudFormation actions get scoped to our two stacks (the toolkit stack
+# bootstrap creates, and the application stack 'cdk deploy' creates/updates).
+# sts:GetCallerIdentity is unscopeable by AWS (no resource form), so it
+# stays Resource:*.
 cat > "$TMPDIR/deploy-perms.json" <<EOF
 {
   "Version":"2012-10-17",
   "Statement":[
     {
-      "Sid":"CloudFormationPermissions","Effect":"Allow",
-      "Action":["cloudformation:CreateChangeSet","cloudformation:DeleteChangeSet","cloudformation:DescribeChangeSet","cloudformation:DescribeStacks","cloudformation:DescribeEvents","cloudformation:ExecuteChangeSet","cloudformation:CreateStack","cloudformation:UpdateStack","cloudformation:RollbackStack","cloudformation:ContinueUpdateRollback"],
-      "Resource":"*"
+      "Sid":"CloudFormationStackOps","Effect":"Allow",
+      "Action":[
+        "cloudformation:CreateChangeSet","cloudformation:DeleteChangeSet","cloudformation:DescribeChangeSet",
+        "cloudformation:DescribeStacks","cloudformation:DescribeStackEvents","cloudformation:ExecuteChangeSet",
+        "cloudformation:CreateStack","cloudformation:UpdateStack","cloudformation:RollbackStack",
+        "cloudformation:ContinueUpdateRollback","cloudformation:DeleteStack",
+        "cloudformation:GetTemplate","cloudformation:GetTemplateSummary","cloudformation:GetHookResult",
+        "cloudformation:UpdateTerminationProtection"
+      ],
+      "Resource":[
+        "arn:aws:cloudformation:${REGION}:${ACCOUNT}:stack/AmsDashboardStack/*",
+        "arn:aws:cloudformation:${REGION}:${ACCOUNT}:stack/AmsDashboardCdkToolkit/*"
+      ]
     },
-    {"Sid":"PassRole","Effect":"Allow","Action":"iam:PassRole","Resource":"${CFN_EXEC_ARN}"},
+    {"Sid":"PassRoleToCfn","Effect":"Allow","Action":"iam:PassRole","Resource":"${CFN_EXEC_ARN}"},
     {
-      "Sid":"CliPermissions","Effect":"Allow",
-      "Action":["cloudformation:DescribeStackEvents","cloudformation:GetTemplate","cloudformation:DeleteStack","cloudformation:UpdateTerminationProtection","sts:GetCallerIdentity","cloudformation:GetTemplateSummary","cloudformation:GetHookResult"],
+      "Sid":"CliCallerIdentity","Effect":"Allow",
+      "Action":"sts:GetCallerIdentity",
       "Resource":"*"
     },
     {
@@ -339,14 +360,9 @@ cat > "$TMPDIR/deploy-perms.json" <<EOF
       "Resource":["arn:aws:s3:::${BUCKET}","arn:aws:s3:::${BUCKET}/*"]
     },
     {
-      "Sid":"ReadVersion","Effect":"Allow",
+      "Sid":"ReadBootstrapVersion","Effect":"Allow",
       "Action":["ssm:GetParameter","ssm:GetParameters"],
       "Resource":"${SSM_PARAM_ARN}"
-    },
-    {
-      "Sid":"Refactor","Effect":"Allow",
-      "Action":["cloudformation:CreateStackRefactor","cloudformation:DescribeStackRefactor","cloudformation:ExecuteStackRefactor","cloudformation:ListStackRefactorActions","cloudformation:ListStackRefactors","cloudformation:ListStacks"],
-      "Resource":"*"
     }
   ]
 }
