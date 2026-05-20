@@ -39,6 +39,13 @@ Optional context:
                               alongside add_vpc_endpoints=true so the
                               endpoint security group can scope its
                               ingress rule to the VPC's address space.
+  - private_route_table_ids : comma-separated route table IDs, same order
+                              as private_subnet_ids. Required alongside
+                              add_vpc_endpoints=true — the S3 gateway
+                              endpoint needs to add its route to the
+                              subnets' route table(s). If all the chosen
+                              subnets use the VPC's main route table,
+                              repeat its ID once per subnet.
   - environment             : 'prod', 'staging', etc. Defaults to 'prod'.
                               Applied as a stack-level tag.
   - tags                    : JSON object of additional tags to apply
@@ -126,6 +133,12 @@ class AmsDashboardStack(cdk.Stack):
         # (they need to know the VPC's CIDR for their SG rules). Read it
         # up-front so it can also be passed to Vpc.from_vpc_attributes.
         vpc_cidr_context = self.node.try_get_context("vpc_cidr") or ""
+        # private_route_table_ids is needed when creating the S3 gateway
+        # endpoint — it adds a route via the gateway endpoint to whichever
+        # route tables the subnets use. Must be the same length as
+        # private_subnet_ids and in the same order.
+        rtb_raw = self.node.try_get_context("private_route_table_ids") or ""
+        rtbs = [r.strip() for r in str(rtb_raw).split(",") if r.strip()]
 
         if subnet_ids:
             if not azs:
@@ -151,6 +164,14 @@ class AmsDashboardStack(cdk.Stack):
             )
             if vpc_cidr_context:
                 vpc_attrs["vpc_cidr_block"] = vpc_cidr_context
+            if rtbs:
+                if len(rtbs) != len(subnet_ids):
+                    raise ValueError(
+                        f"private_route_table_ids has {len(rtbs)} entries but "
+                        f"private_subnet_ids has {len(subnet_ids)}. Lengths must "
+                        f"match (one route table ID per subnet, same order)."
+                    )
+                vpc_attrs["private_subnet_route_table_ids"] = rtbs
             vpc = ec2.Vpc.from_vpc_attributes(self, "Vpc", **vpc_attrs)
             private_subnets = ec2.SubnetSelection(subnets=vpc.private_subnets)
         else:
@@ -340,6 +361,15 @@ class AmsDashboardStack(cdk.Stack):
                     "-c vpc_cidr=<VPC CIDR, e.g. 172.31.0.0/16>. The "
                     "endpoint security group needs to allow HTTPS from "
                     "anywhere in the VPC."
+                )
+            if not rtbs:
+                raise ValueError(
+                    "When -c add_vpc_endpoints=true is set, also pass "
+                    "-c private_route_table_ids=<rtb-id>[,<rtb-id>] (one "
+                    "per subnet, same order as private_subnet_ids). The S3 "
+                    "gateway endpoint needs to add its route to those route "
+                    "tables. If all subnets use the VPC's main route table, "
+                    "repeat the same RTB ID."
                 )
             vpc_cidr = vpc_cidr_context
             endpoint_sg = ec2.SecurityGroup(
