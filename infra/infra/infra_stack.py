@@ -29,6 +29,16 @@ Optional context:
   - availability_zones      : comma-separated AZs matching the subnets,
                               same order (e.g. 'us-west-2a,us-west-2b').
                               Required when private_subnet_ids is set.
+  - add_vpc_endpoints       : 'true' (default 'false'). When the VPC has
+                              no NAT/IGW egress, set this to create the
+                              interface endpoints the Fargate tasks need
+                              (Secrets Manager, ECR API, ECR Docker,
+                              CloudWatch Logs) plus the S3 gateway
+                              endpoint. Costs ~$56/mo across 2 AZs.
+  - vpc_cidr                : VPC CIDR (e.g. '172.31.0.0/16'). Required
+                              alongside add_vpc_endpoints=true so the
+                              endpoint security group can scope its
+                              ingress rule to the VPC's address space.
   - environment             : 'prod', 'staging', etc. Defaults to 'prod'.
                               Applied as a stack-level tag.
   - tags                    : JSON object of additional tags to apply
@@ -314,6 +324,56 @@ class AmsDashboardStack(cdk.Stack):
             path="/health", healthy_http_codes="200"
         )
         db_cluster.connections.allow_default_port_from(api_service.service)
+
+        # ── VPC endpoints (optional, when the VPC has no NAT/IGW egress) ──
+        add_endpoints = str(self.node.try_get_context("add_vpc_endpoints") or "").lower() == "true"
+        if add_endpoints:
+            vpc_cidr = self.node.try_get_context("vpc_cidr")
+            if not vpc_cidr:
+                raise ValueError(
+                    "When -c add_vpc_endpoints=true is set, also pass "
+                    "-c vpc_cidr=<VPC CIDR, e.g. 172.31.0.0/16>. The "
+                    "endpoint security group needs to allow HTTPS from "
+                    "anywhere in the VPC."
+                )
+            endpoint_sg = ec2.SecurityGroup(
+                self,
+                "VpcEndpointSg",
+                vpc=vpc,
+                description="HTTPS inbound to AWS service interface endpoints",
+                allow_all_outbound=False,
+            )
+            endpoint_sg.add_ingress_rule(
+                ec2.Peer.ipv4(vpc_cidr),
+                ec2.Port.tcp(443),
+                "HTTPS from anywhere in this VPC",
+            )
+
+            interface_services = [
+                ("SecretsManager", ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER),
+                ("EcrApi", ec2.InterfaceVpcEndpointAwsService.ECR),
+                ("EcrDkr", ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER),
+                ("Logs", ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS),
+            ]
+            for name, svc in interface_services:
+                ec2.InterfaceVpcEndpoint(
+                    self,
+                    f"VpcEndpoint{name}",
+                    vpc=vpc,
+                    service=svc,
+                    subnets=private_subnets,
+                    security_groups=[endpoint_sg],
+                    private_dns_enabled=True,
+                )
+            # ECR layer storage lives in S3 — gateway endpoint is free and
+            # required for image pulls when there's no NAT/IGW.
+            ec2.GatewayVpcEndpoint(
+                self,
+                "VpcEndpointS3",
+                vpc=vpc,
+                service=ec2.GatewayVpcEndpointAwsService.S3,
+                subnets=[private_subnets],
+            )
 
         # ── Migration task definition (manual: aws ecs run-task) ───────
         migration_task = ecs.FargateTaskDefinition(
