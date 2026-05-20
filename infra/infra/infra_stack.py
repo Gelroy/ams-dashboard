@@ -122,6 +122,11 @@ class AmsDashboardStack(cdk.Stack):
         subnet_ids = [s.strip() for s in str(private_subnet_ids_raw).split(",") if s.strip()]
         azs = [a.strip() for a in str(azs_raw).split(",") if a.strip()]
 
+        # vpc_cidr is needed if we'll be creating VPC interface endpoints
+        # (they need to know the VPC's CIDR for their SG rules). Read it
+        # up-front so it can also be passed to Vpc.from_vpc_attributes.
+        vpc_cidr_context = self.node.try_get_context("vpc_cidr") or ""
+
         if subnet_ids:
             if not azs:
                 raise ValueError(
@@ -139,13 +144,14 @@ class AmsDashboardStack(cdk.Stack):
                     "Provide at least 2 private subnet IDs in different AZs — "
                     "the internal ALB requires multi-AZ for HA."
                 )
-            vpc = ec2.Vpc.from_vpc_attributes(
-                self,
-                "Vpc",
+            vpc_attrs = dict(
                 vpc_id=vpc_id,
                 availability_zones=azs,
                 private_subnet_ids=subnet_ids,
             )
+            if vpc_cidr_context:
+                vpc_attrs["vpc_cidr_block"] = vpc_cidr_context
+            vpc = ec2.Vpc.from_vpc_attributes(self, "Vpc", **vpc_attrs)
             private_subnets = ec2.SubnetSelection(subnets=vpc.private_subnets)
         else:
             vpc = ec2.Vpc.from_lookup(self, "Vpc", vpc_id=vpc_id)
@@ -328,14 +334,14 @@ class AmsDashboardStack(cdk.Stack):
         # ── VPC endpoints (optional, when the VPC has no NAT/IGW egress) ──
         add_endpoints = str(self.node.try_get_context("add_vpc_endpoints") or "").lower() == "true"
         if add_endpoints:
-            vpc_cidr = self.node.try_get_context("vpc_cidr")
-            if not vpc_cidr:
+            if not vpc_cidr_context:
                 raise ValueError(
                     "When -c add_vpc_endpoints=true is set, also pass "
                     "-c vpc_cidr=<VPC CIDR, e.g. 172.31.0.0/16>. The "
                     "endpoint security group needs to allow HTTPS from "
                     "anywhere in the VPC."
                 )
+            vpc_cidr = vpc_cidr_context
             endpoint_sg = ec2.SecurityGroup(
                 self,
                 "VpcEndpointSg",
