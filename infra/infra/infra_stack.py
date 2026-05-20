@@ -244,7 +244,11 @@ class AmsDashboardStack(cdk.Stack):
             "ApiLogs",
             log_group_name="/ams-dashboard/api",
             retention=logs.RetentionDays.ONE_MONTH,
-            removal_policy=RemovalPolicy.DESTROY,
+            # RETAIN so logs survive stack rollback — without this, a CFN
+            # rollback after a failed first deploy nukes the log group along
+            # with the rest of the stack, and we lose the container's stdout
+            # that explains why it failed.
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # Env + secrets are shared by API and sync tasks.
@@ -297,7 +301,12 @@ class AmsDashboardStack(cdk.Stack):
                 ),
             ),
             health_check_grace_period=Duration.seconds(60),
-            circuit_breaker=ecs.DeploymentCircuitBreaker(enable=True, rollback=True),
+            # Circuit breaker still fires when tasks repeatedly fail to
+            # start, but we set rollback=False so the failing tasks (and
+            # their stop reasons) stay visible for debugging instead of
+            # being torn down. Re-enable rollback once the first deploy is
+            # known-good.
+            circuit_breaker=ecs.DeploymentCircuitBreaker(enable=True, rollback=False),
             min_healthy_percent=50,
             max_healthy_percent=200,
         )
@@ -332,7 +341,7 @@ class AmsDashboardStack(cdk.Stack):
             "SyncLogs",
             log_group_name="/ams-dashboard/jira-sync",
             retention=logs.RetentionDays.ONE_MONTH,
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         def _scheduled_sync(name: str, mgmt_command: str, schedule: appscaling.Schedule):
