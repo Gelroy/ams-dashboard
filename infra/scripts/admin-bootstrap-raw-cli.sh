@@ -324,11 +324,11 @@ aws iam put-role-policy --role-name "$LOOKUP_ROLE" \
   --policy-document "file://$TMPDIR/lookup-deny-secrets.json"
 echo "    $LOOKUP_ROLE   ← Deny kms:Decrypt (DontReadSecrets)"
 
-SSM_PARAM_ARN="arn:aws:ssm:${REGION}:${ACCOUNT}:parameter/cdk-bootstrap/${QUALIFIER}/version"
 # CloudFormation actions get scoped to our two stacks (the toolkit stack
 # bootstrap creates, and the application stack 'cdk deploy' creates/updates).
 # sts:GetCallerIdentity is unscopeable by AWS (no resource form), so it
-# stays Resource:*.
+# stays Resource:*. SSM is scoped to /cdk-bootstrap/* so the deploy role
+# can read both the version marker and any sibling parameters CDK pokes at.
 cat > "$TMPDIR/deploy-perms.json" <<EOF
 {
   "Version":"2012-10-17",
@@ -337,9 +337,9 @@ cat > "$TMPDIR/deploy-perms.json" <<EOF
       "Sid":"CloudFormationStackOps","Effect":"Allow",
       "Action":[
         "cloudformation:CreateChangeSet","cloudformation:DeleteChangeSet","cloudformation:DescribeChangeSet",
-        "cloudformation:DescribeStacks","cloudformation:DescribeStackEvents","cloudformation:ExecuteChangeSet",
-        "cloudformation:CreateStack","cloudformation:UpdateStack","cloudformation:RollbackStack",
-        "cloudformation:ContinueUpdateRollback","cloudformation:DeleteStack",
+        "cloudformation:DescribeStacks","cloudformation:DescribeStackEvents","cloudformation:DescribeEvents",
+        "cloudformation:ExecuteChangeSet","cloudformation:CreateStack","cloudformation:UpdateStack",
+        "cloudformation:RollbackStack","cloudformation:ContinueUpdateRollback","cloudformation:DeleteStack",
         "cloudformation:GetTemplate","cloudformation:GetTemplateSummary","cloudformation:GetHookResult",
         "cloudformation:UpdateTerminationProtection"
       ],
@@ -362,7 +362,7 @@ cat > "$TMPDIR/deploy-perms.json" <<EOF
     {
       "Sid":"ReadBootstrapVersion","Effect":"Allow",
       "Action":["ssm:GetParameter","ssm:GetParameters"],
-      "Resource":"${SSM_PARAM_ARN}"
+      "Resource":"arn:aws:ssm:${REGION}:${ACCOUNT}:parameter/cdk-bootstrap/*"
     }
   ]
 }
