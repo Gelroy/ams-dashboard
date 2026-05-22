@@ -14,9 +14,20 @@ Provisions everything the AWS admin needs from a single ``cdk deploy``:
   - A migration TaskDefinition the admin runs once per deploy
 
 Required context (set in cdk.json or via -c flags):
-  - vpc_id                  : the existing shared VPC ID
+  - vpc_id                  : the existing shared VPC ID, OR
+  - create_vpc=true         : have this stack provision a new VPC (2 AZs,
+                              public + private subnets, no NAT gateway by
+                              default — Fargate tasks run in public subnets
+                              with assign_public_ip=True). Mutually exclusive
+                              with vpc_id. Intended for deploys into a fresh
+                              sub account that has no existing VPC infra.
 
 Optional context:
+  - nat_gateways            : with create_vpc=true, number of NAT gateways
+                              (default 0 — tasks run in public subnets, ~$0/mo
+                              on the VPC itself; set 1 for ~$33/mo NAT or 2
+                              for HA NAT ~$66/mo, which moves tasks back to
+                              private subnets).
   - acm_cert_arn            : ACM cert in the same region for the ALB. If
                               empty, the ALB serves plain HTTP — fine for
                               initial smoke-testing on the corporate network.
@@ -93,10 +104,17 @@ class AmsDashboardStack(cdk.Stack):
 
         # ── Context ─────────────────────────────────────────────────────
         vpc_id = self.node.try_get_context("vpc_id")
-        if not vpc_id:
+        create_vpc = str(self.node.try_get_context("create_vpc") or "").lower() == "true"
+        if not vpc_id and not create_vpc:
             raise ValueError(
-                "Set vpc_id context (cdk deploy -c vpc_id=vpc-xxx) — the existing "
-                "shared VPC the app should live in."
+                "Choose a VPC strategy: pass -c vpc_id=vpc-xxx to consume an "
+                "existing VPC, or -c create_vpc=true to have this stack "
+                "provision a new VPC (2 AZs, 1 NAT gateway, public + private "
+                "subnets — suitable for a fresh sub account)."
+            )
+        if vpc_id and create_vpc:
+            raise ValueError(
+                "vpc_id and create_vpc=true are mutually exclusive — pick one."
             )
         cert_arn = self.node.try_get_context("acm_cert_arn") or ""
         environment = self.node.try_get_context("environment") or "prod"
@@ -140,7 +158,56 @@ class AmsDashboardStack(cdk.Stack):
         rtb_raw = self.node.try_get_context("private_route_table_ids") or ""
         rtbs = [r.strip() for r in str(rtb_raw).split(",") if r.strip()]
 
-        if subnet_ids:
+        if create_vpc:
+            # Fresh-account path: provision a new VPC with 2 AZs.
+            #
+            # Default (nat_gateways=0): no NAT, ~$0/mo on the VPC itself.
+            #   - Fargate tasks run in PUBLIC subnets with assign_public_ip=True
+            #     so they can pull images from ECR and reach Atlassian / Cognito
+            #     directly via the IGW. Inbound is still locked down by the
+            #     task security group (only the ALB SG can reach them).
+            #   - Aurora + internal ALB live in PRIVATE_WITH_EGRESS subnets
+            #     (no NAT means no actual egress, but that's fine — neither
+            #     needs to reach the internet).
+            #
+            # nat_gateways>=1: tasks move to PRIVATE_WITH_EGRESS subnets and
+            #   reach the internet through NAT (~$33/mo per NAT). Pick this if
+            #   policy prohibits public IPs on workloads, or if the SecOps team
+            #   would rather pay for NAT than audit task SGs.
+            nat_gateways_raw = self.node.try_get_context("nat_gateways")
+            nat_gateways = int(nat_gateways_raw) if nat_gateways_raw is not None else 0
+            vpc = ec2.Vpc(
+                self,
+                "Vpc",
+                max_azs=2,
+                nat_gateways=nat_gateways,
+                subnet_configuration=[
+                    ec2.SubnetConfiguration(
+                        name="Public",
+                        subnet_type=ec2.SubnetType.PUBLIC,
+                        cidr_mask=24,
+                    ),
+                    ec2.SubnetConfiguration(
+                        name="Private",
+                        subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
+                        cidr_mask=24,
+                    ),
+                ],
+            )
+            # Aurora + internal ALB always sit in the private subnets.
+            private_subnets = ec2.SubnetSelection(
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+            )
+            # Fargate task placement depends on whether NAT exists.
+            if nat_gateways > 0:
+                task_subnets = private_subnets
+                task_assign_public_ip = False
+            else:
+                task_subnets = ec2.SubnetSelection(
+                    subnet_type=ec2.SubnetType.PUBLIC
+                )
+                task_assign_public_ip = True
+        elif subnet_ids:
             if not azs:
                 raise ValueError(
                     "When -c private_subnet_ids=... is set, also pass "
@@ -174,11 +241,15 @@ class AmsDashboardStack(cdk.Stack):
                 vpc_attrs["private_subnet_route_table_ids"] = rtbs
             vpc = ec2.Vpc.from_vpc_attributes(self, "Vpc", **vpc_attrs)
             private_subnets = ec2.SubnetSelection(subnets=vpc.private_subnets)
+            task_subnets = private_subnets
+            task_assign_public_ip = False
         else:
             vpc = ec2.Vpc.from_lookup(self, "Vpc", vpc_id=vpc_id)
             private_subnets = ec2.SubnetSelection(
                 subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
             )
+            task_subnets = private_subnets
+            task_assign_public_ip = False
 
         # ── Secrets ─────────────────────────────────────────────────────
         django_secret = secretsmanager.Secret(
@@ -280,7 +351,7 @@ class AmsDashboardStack(cdk.Stack):
             self,
             "ApiLogs",
             log_group_name="/ams-dashboard/api",
-            retention=logs.RetentionDays.ONE_MONTH,
+            retention=logs.RetentionDays.TWO_WEEKS,
             # RETAIN so logs survive stack rollback — without this, a CFN
             # rollback after a failed first deploy nukes the log group along
             # with the rest of the stack, and we lose the container's stdout
@@ -320,11 +391,12 @@ class AmsDashboardStack(cdk.Stack):
             self,
             "ApiService",
             cluster=cluster,
-            cpu=512,
-            memory_limit_mib=1024,
-            desired_count=2,
+            cpu=256,
+            memory_limit_mib=512,
+            desired_count=1,
             public_load_balancer=False,  # internal ALB
-            task_subnets=private_subnets,
+            task_subnets=task_subnets,
+            assign_public_ip=task_assign_public_ip,
             certificate=certificate,
             redirect_http=bool(certificate),
             protocol=elbv2.ApplicationProtocol.HTTPS if certificate else elbv2.ApplicationProtocol.HTTP,
@@ -436,7 +508,7 @@ class AmsDashboardStack(cdk.Stack):
             self,
             "SyncLogs",
             log_group_name="/ams-dashboard/jira-sync",
-            retention=logs.RetentionDays.ONE_MONTH,
+            retention=logs.RetentionDays.TWO_WEEKS,
             removal_policy=RemovalPolicy.RETAIN,
         )
 
@@ -465,8 +537,19 @@ class AmsDashboardStack(cdk.Stack):
                     task_definition=task_def
                 ),
                 schedule=schedule,
-                subnet_selection=private_subnets,
+                subnet_selection=task_subnets,
             )
+            # ScheduledFargateTask doesn't expose assign_public_ip directly
+            # (open CDK gap). When tasks run in public subnets we need to
+            # set it via CfnRule property override so they can reach Atlassian
+            # + ECR — SG still blocks all inbound from the SG defaulted by
+            # the construct.
+            if task_assign_public_ip:
+                cfn_rule = scheduled.event_rule.node.default_child
+                cfn_rule.add_property_override(
+                    "Targets.0.EcsParameters.NetworkConfiguration.AwsVpcConfiguration.AssignPublicIp",
+                    "ENABLED",
+                )
             # Allow the scheduled task's SG to reach the DB.
             for sg in scheduled.task.security_groups:
                 db_cluster.connections.allow_default_port_from(sg)

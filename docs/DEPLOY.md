@@ -22,7 +22,7 @@ Information needed from your platform / security teams before first deploy:
 
 | Item | Where it goes |
 |---|---|
-| VPC ID (the shared internal VPC) | `cdk deploy -c vpc_id=vpc-…` |
+| VPC ID (the shared internal VPC) | `cdk deploy -c vpc_id=vpc-…` (or `-c create_vpc=true` to have the stack provision a new VPC — see below) |
 | AWS account number | `cdk deploy -c account=…` (or `CDK_DEFAULT_ACCOUNT`) |
 | AWS region | `cdk deploy -c region=…` (or `CDK_DEFAULT_REGION`) |
 | ACM certificate ARN (optional for first deploy) | `cdk deploy -c acm_cert_arn=arn:aws:acm:…` |
@@ -30,6 +30,41 @@ Information needed from your platform / security teams before first deploy:
 | Environment label (`prod`, `staging`, …) | `cdk deploy -c environment=prod` (default: `prod`) |
 | Company-specific tags (CostCenter, Owner, etc.) | `cdk deploy -c tags='{"CostCenter":"4321","Owner":"AMS-IT"}'` |
 | Private subnet IDs (when VPC subnets aren't CDK-tagged) | `cdk deploy -c private_subnet_ids=subnet-a,subnet-b -c availability_zones=us-west-2a,us-west-2b` |
+
+### Deploying into a fresh sub account (no existing VPC)
+
+When the target account is empty — e.g. a new sub account your AWS admin
+spun up for this project — there's no shared VPC to consume. Pass
+`-c create_vpc=true` and the stack will provision a new VPC alongside
+everything else:
+
+```bash
+cdk deploy \
+  -c account=<ACCOUNT> \
+  -c region=<REGION> \
+  -c create_vpc=true
+```
+
+The created VPC has:
+- 2 AZs (`max_azs=2`)
+- Public subnets in each AZ
+- Private-with-egress subnets in each AZ (where Aurora + the internal ALB live)
+- **No NAT gateway by default** — Fargate tasks run in the public subnets
+  with `assign_public_ip=True`. They can reach ECR / Atlassian / Cognito via
+  the IGW, but the task security group still blocks all inbound except from
+  the ALB SG. Saves ~$33/mo vs a NAT-based topology.
+
+To add NAT instead (e.g. policy forbids public IPs on workloads), pass
+`-c nat_gateways=1` (~$33/mo) or `-c nat_gateways=2` for HA across both
+AZs (~$66/mo). Tasks then move to the private subnets and don't get
+public IPs.
+
+Do not combine `-c create_vpc=true` with `-c vpc_id=…` — they're mutually
+exclusive.
+
+`cdk destroy` will tear the VPC down along with the rest of the stack
+(the Aurora cluster's final snapshot and the Cognito user pool are
+retained per their removal policies).
 
 ### When you hit "There are no private subnet groups in this VPC"
 
@@ -331,10 +366,14 @@ aws secretsmanager put-secret-value \
 
 The Django schema must be applied before the API can talk to the DB.
 
+Match the subnet type and `assignPublicIp` to the deployed topology:
+- **Default (`create_vpc=true`, no NAT):** Public subnets, `assignPublicIp=ENABLED`
+- **NAT path (`-c nat_gateways>=1`, or existing-VPC with NAT):** Private subnets, `assignPublicIp=DISABLED`
+
 ```bash
-# Get a subnet ID (private subnet) and the API service's security group ID:
+# Default no-NAT topology (substitute Private/DISABLED if you set nat_gateways>0):
 SUBNET=$(aws ec2 describe-subnets \
-  --filters "Name=vpc-id,Values=vpc-XXXXXXXX" "Name=tag:aws-cdk:subnet-type,Values=Private" \
+  --filters "Name=vpc-id,Values=vpc-XXXXXXXX" "Name=tag:aws-cdk:subnet-type,Values=Public" \
   --query 'Subnets[0].SubnetId' --output text)
 SG=$(aws ecs describe-services --cluster <ClusterName> \
   --services <ApiServiceName> \
@@ -345,7 +384,7 @@ aws ecs run-task \
   --cluster <ClusterName> \
   --task-definition <MigrationTaskArn> \
   --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET],securityGroups=[$SG],assignPublicIp=DISABLED}"
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET],securityGroups=[$SG],assignPublicIp=ENABLED}"
 ```
 
 Watch progress in CloudWatch Logs at `/ams-dashboard/api` (stream prefix
