@@ -16,17 +16,30 @@ import type {
   SoftwareVersionStatus,
 } from './types'
 
+import { clearTokenAndRedirectToLogin, getToken } from './auth'
+
 const API_BASE = '/api'
 
+// Paths exempt from the 401 → /login bounce: the login flow itself, where a
+// 401 means "bad credentials" and should surface to the caller, not redirect
+// the user to a page they're already on.
+const AUTH_PATHS = new Set(['/auth/login', '/auth/challenge'])
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken()
   const r = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
   })
+  if (r.status === 401 && !AUTH_PATHS.has(path)) {
+    clearTokenAndRedirectToLogin()
+    throw new Error('Unauthorized')
+  }
   if (!r.ok) {
     let detail = ''
     try {
@@ -37,6 +50,45 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`HTTP ${r.status} ${r.statusText}${detail}`)
   }
   return r.json() as Promise<T>
+}
+
+// ── Auth endpoints — exposed for the LoginPage / NewPasswordPage. ─────
+export interface LoginSuccess {
+  id_token: string
+  access_token: string
+  refresh_token?: string
+  expires_in?: number
+  token_type?: string
+}
+
+export interface NewPasswordChallenge {
+  challenge: 'NEW_PASSWORD_REQUIRED'
+  session: string
+  username: string
+}
+
+export type LoginResponse = LoginSuccess | NewPasswordChallenge
+
+export function isNewPasswordChallenge(r: LoginResponse): r is NewPasswordChallenge {
+  return (r as NewPasswordChallenge).challenge === 'NEW_PASSWORD_REQUIRED'
+}
+
+export async function login(username: string, password: string): Promise<LoginResponse> {
+  return request<LoginResponse>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+}
+
+export async function respondToNewPassword(
+  session: string,
+  username: string,
+  newPassword: string,
+): Promise<LoginSuccess> {
+  return request<LoginSuccess>('/auth/challenge', {
+    method: 'POST',
+    body: JSON.stringify({ session, username, new_password: newPassword }),
+  })
 }
 
 export interface ListOrganizationsParams {
