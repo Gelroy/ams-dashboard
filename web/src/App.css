@@ -676,3 +676,47 @@
 .filter-checkbox input[type="checkbox"] {
   cursor: pointer;
 }
+
+/* Fallback rendered by <ErrorBoundary> when a routed page throws. */
+.error-boundary {
+  max-width: 720px;
+  margin: 2rem auto;
+  padding: 1.5rem;
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 8px;
+  background: rgba(254, 226, 226, 0.4);
+  color: var(--color-text-primary, #111);
+}
+.error-boundary h2 {
+  margin: 0 0 0.5rem;
+  font-size: 17px;
+  color: rgb(185, 28, 28);
+}
+.error-boundary p {
+  margin: 0 0 1rem;
+  color: var(--color-text-secondary, #555);
+}
+.error-boundary details {
+  margin: 0.5rem 0 1rem;
+  font-size: 12px;
+}
+.error-boundary details pre {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+  padding: 0.5rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.error-boundary .error-reload {
+  padding: 0.5rem 1rem;
+  border: 0;
+  border-radius: 4px;
+  background: rgb(185, 28, 28);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+}
+.error-boundary .error-reload:hover {
+  background: rgb(153, 27, 27);
+}

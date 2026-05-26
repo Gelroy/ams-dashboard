@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
-import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 
 import { getToken } from './auth'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { SidebarNav } from './components/SidebarNav'
 import { ActivitiesPage } from './pages/ActivitiesPage'
 import { AnalyticsPage } from './pages/AnalyticsPage'
@@ -25,13 +26,19 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-/** Shell layout used by every authenticated page. */
+/** Shell layout used by every authenticated page. The ErrorBoundary inside
+ * the content area catches render-time exceptions per route — a bug in
+ * /patch-execution won't blank /customers. The `key={pathname}` ensures the
+ * boundary resets when the user navigates away. */
 function AppLayout() {
+  const location = useLocation()
   return (
     <div className="shell">
       <SidebarNav />
       <main className="content">
-        <Outlet />
+        <ErrorBoundary key={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   )
