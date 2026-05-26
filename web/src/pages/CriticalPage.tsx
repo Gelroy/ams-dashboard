@@ -48,7 +48,7 @@ export function CriticalPage() {
   return (
     <div>
       <div className="panel-header-row">
-        <span className="panel-title">Critical — next 6 weeks</span>
+        <span className="panel-title">Critical — past 6 weeks + next 6 weeks</span>
         <span className="panel-hint">
           {data.events.length} event{data.events.length === 1 ? '' : 's'}
         </span>
