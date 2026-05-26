@@ -33,7 +33,13 @@ export function ActivitiesPage() {
   const refresh = () => {
     setLoading(true)
     setError(null)
-    Promise.all([listActivities(filter), listOrganizations({ limit: 200 }), listStaff()])
+    Promise.all([
+      listActivities(filter),
+      // AMS team only schedules activities for contracted customers; the
+      // Customer dropdown in the Add form is fed by this list.
+      listOrganizations({ limit: 200, has_ams_level: true }),
+      listStaff(),
+    ])
       .then(([a, o, s]) => {
         setItems(a)
         setOrgs(o.results)

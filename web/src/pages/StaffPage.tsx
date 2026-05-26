@@ -19,7 +19,9 @@ export function StaffPage() {
   const refresh = () => {
     setLoading(true)
     setError(null)
-    Promise.all([listStaff(), listOrganizations({ limit: 200 })])
+    // AMS team only assigns SMEs to contracted customers; feeds the chip
+    // grid where SMEs are toggled on/off per customer.
+    Promise.all([listStaff(), listOrganizations({ limit: 200, has_ams_level: true })])
       .then(([s, o]) => {
         setStaff(s)
         setOrgs(o.results)

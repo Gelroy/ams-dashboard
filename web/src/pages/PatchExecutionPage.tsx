@@ -11,6 +11,7 @@ import {
   deletePatchGroupStep,
   deletePatchPlan,
   listBaskets,
+  listEnvironments,
   listOrganizations,
   listPatchExecutions,
   listPatchGroups,
@@ -501,7 +502,9 @@ function ExecutionsTab() {
     setError(null)
     Promise.all([
       listPatchExecutions('active'),
-      listOrganizations({ limit: 200 }),
+      // AMS team only patches contracted customers; this feeds the Customer
+      // dropdown in the Add Execution form.
+      listOrganizations({ limit: 200, has_ams_level: true }),
       listBaskets(),
       listPatchPlans(),
     ])
@@ -572,9 +575,9 @@ function AddExecutionForm({
       setOrgEnvs([])
       return
     }
-    fetch(`/api/organizations/${orgId}/environments/`)
-      .then((r) => r.json())
-      .then((d: { id: string; name: string }[]) => setOrgEnvs(d))
+    listEnvironments(orgId)
+      .then((envs) => setOrgEnvs(envs))
+      .catch(() => setOrgEnvs([]))
   }, [orgId])
 
   // Auto-pick the matching plan if exactly one plan references the chosen basket.
