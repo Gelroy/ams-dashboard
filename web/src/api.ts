@@ -49,6 +49,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(`HTTP ${r.status} ${r.statusText}${detail}`)
   }
+  // 204 No Content (typical for DELETE) has no JSON body; calling r.json()
+  // would throw "Unexpected end of JSON input". Return undefined so callers
+  // that type T as void get something sensible.
+  if (r.status === 204) {
+    return undefined as T
+  }
   return r.json() as Promise<T>
 }
 
@@ -153,11 +159,7 @@ export function updateOrgDocument(
 }
 
 export function deleteOrgDocument(orgId: string, documentId: string): Promise<void> {
-  return fetch(`/api/organizations/${orgId}/documents/${documentId}/`, {
-    method: 'DELETE',
-  }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/organizations/${orgId}/documents/${documentId}/`, { method: 'DELETE' })
 }
 
 export function updateOrgUser(
@@ -184,11 +186,7 @@ export function createEnvironment(orgId: string, name: string, position: number)
 }
 
 export function deleteEnvironment(orgId: string, envId: string): Promise<void> {
-  return fetch(`/api/organizations/${orgId}/environments/${envId}/`, { method: 'DELETE' }).then(
-    (r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-    },
-  )
+  return request<void>(`/organizations/${orgId}/environments/${envId}/`, { method: 'DELETE' })
 }
 
 export function listServers(orgId: string): Promise<Server[]> {
@@ -217,11 +215,7 @@ export function updateServer(
 }
 
 export function deleteServer(orgId: string, serverId: string): Promise<void> {
-  return fetch(`/api/organizations/${orgId}/servers/${serverId}/`, { method: 'DELETE' }).then(
-    (r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-    },
-  )
+  return request<void>(`/organizations/${orgId}/servers/${serverId}/`, { method: 'DELETE' })
 }
 
 // Software catalog. /api/software/ returns the full nested tree.
@@ -247,9 +241,7 @@ export function updateSoftware(
 }
 
 export function deleteSoftware(id: string): Promise<void> {
-  return fetch(`/api/software/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/software/${id}/`, { method: 'DELETE' })
 }
 
 export function createVersion(
@@ -274,11 +266,7 @@ export function updateVersion(
 }
 
 export function deleteVersion(softwareId: string, versionId: string): Promise<void> {
-  return fetch(`/api/software/${softwareId}/versions/${versionId}/`, { method: 'DELETE' }).then(
-    (r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-    },
-  )
+  return request<void>(`/software/${softwareId}/versions/${versionId}/`, { method: 'DELETE' })
 }
 
 export function createRelease(
@@ -314,12 +302,7 @@ export function deleteRelease(
   versionId: string,
   releaseId: string,
 ): Promise<void> {
-  return fetch(
-    `/api/software/${softwareId}/versions/${versionId}/releases/${releaseId}/`,
-    { method: 'DELETE' },
-  ).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/software/${softwareId}/versions/${versionId}/releases/${releaseId}/`, { method: 'DELETE' })
 }
 
 // Baskets
@@ -345,9 +328,7 @@ export function updateBasket(
 }
 
 export function deleteBasket(id: string): Promise<void> {
-  return fetch(`/api/baskets/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/baskets/${id}/`, { method: 'DELETE' })
 }
 
 export function addBasketSoftware(
@@ -372,11 +353,7 @@ export function updateBasketSoftware(
 }
 
 export function removeBasketSoftware(basketId: string, softwareId: string): Promise<void> {
-  return fetch(`/api/baskets/${basketId}/software/${softwareId}/`, { method: 'DELETE' }).then(
-    (r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-    },
-  )
+  return request<void>(`/baskets/${basketId}/software/${softwareId}/`, { method: 'DELETE' })
 }
 
 // Per-server basket assignment
@@ -435,11 +412,7 @@ export function removeInstalledSoftware(
   serverId: string,
   id: string,
 ): Promise<void> {
-  return fetch(`/api/organizations/${orgId}/servers/${serverId}/installed/${id}/`, {
-    method: 'DELETE',
-  }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/organizations/${orgId}/servers/${serverId}/installed/${id}/`, { method: 'DELETE' })
 }
 
 // Patch Groups
@@ -465,9 +438,7 @@ export function updatePatchGroup(
 }
 
 export function deletePatchGroup(id: string): Promise<void> {
-  return fetch(`/api/patch-groups/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/patch-groups/${id}/`, { method: 'DELETE' })
 }
 
 export function createPatchGroupStep(
@@ -492,9 +463,7 @@ export function updatePatchGroupStep(
 }
 
 export function deletePatchGroupStep(groupId: string, stepId: string): Promise<void> {
-  return fetch(`/api/patch-groups/${groupId}/steps/${stepId}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/patch-groups/${groupId}/steps/${stepId}/`, { method: 'DELETE' })
 }
 
 // Patch Plans
@@ -520,9 +489,7 @@ export function updatePatchPlan(
 }
 
 export function deletePatchPlan(id: string): Promise<void> {
-  return fetch(`/api/patch-plans/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/patch-plans/${id}/`, { method: 'DELETE' })
 }
 
 export function addPatchPlanGroup(
@@ -536,9 +503,7 @@ export function addPatchPlanGroup(
 }
 
 export function removePatchPlanGroup(planId: string, groupId: string): Promise<void> {
-  return fetch(`/api/patch-plans/${planId}/groups/${groupId}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/patch-plans/${planId}/groups/${groupId}/`, { method: 'DELETE' })
 }
 
 // Patch Executions
@@ -621,9 +586,7 @@ export function updateAnalyticDefinition(
 }
 
 export function deleteAnalyticDefinition(id: string): Promise<void> {
-  return fetch(`/api/analytic-definitions/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/analytic-definitions/${id}/`, { method: 'DELETE' })
 }
 
 export function listCustomerAnalytics(
@@ -645,9 +608,7 @@ export function createCustomerAnalytic(payload: {
 }
 
 export function deleteCustomerAnalytic(id: string): Promise<void> {
-  return fetch(`/api/customer-analytics/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/customer-analytics/${id}/`, { method: 'DELETE' })
 }
 
 export function recordAnalyticHistory(
@@ -664,11 +625,7 @@ export function deleteAnalyticHistory(
   customerAnalyticId: string,
   historyId: string,
 ): Promise<void> {
-  return fetch(`/api/customer-analytics/${customerAnalyticId}/history/${historyId}/`, {
-    method: 'DELETE',
-  }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/customer-analytics/${customerAnalyticId}/history/${historyId}/`, { method: 'DELETE' })
 }
 
 // Staff
@@ -692,9 +649,7 @@ export function updateStaff(
 }
 
 export function deleteStaff(id: string): Promise<void> {
-  return fetch(`/api/staff/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/staff/${id}/`, { method: 'DELETE' })
 }
 
 export function setStaffSmeOrganizations(
@@ -745,9 +700,7 @@ export function updateActivity(
 }
 
 export function deleteActivity(id: string): Promise<void> {
-  return fetch(`/api/activities/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/activities/${id}/`, { method: 'DELETE' })
 }
 
 export function completeActivity(id: string): Promise<import('./types').Activity> {
