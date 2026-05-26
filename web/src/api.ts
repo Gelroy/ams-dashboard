@@ -94,6 +94,7 @@ export async function respondToNewPassword(
 export interface ListOrganizationsParams {
   q?: string
   ams_level?: string
+  has_ams_level?: boolean
   limit?: number
   offset?: number
 }
@@ -104,6 +105,7 @@ export function listOrganizations(
   const qs = new URLSearchParams()
   if (params.q) qs.set('q', params.q)
   if (params.ams_level) qs.set('ams_level', params.ams_level)
+  if (params.has_ams_level) qs.set('has_ams_level', 'true')
   if (params.limit != null) qs.set('limit', String(params.limit))
   if (params.offset != null) qs.set('offset', String(params.offset))
   const tail = qs.toString() ? `?${qs.toString()}` : ''

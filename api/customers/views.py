@@ -24,6 +24,10 @@ class SoftDeleteDestroyMixin:
 
 class OrganizationFilter(filters.FilterSet):
     q = filters.CharFilter(method="filter_q", help_text="Substring match on name (case-insensitive)")
+    has_ams_level = filters.BooleanFilter(
+        method="filter_has_ams_level",
+        help_text="When true, only return orgs with an AMS level assigned.",
+    )
 
     class Meta:
         model = Organization
@@ -31,6 +35,14 @@ class OrganizationFilter(filters.FilterSet):
 
     def filter_q(self, queryset, name, value):
         return queryset.filter(Q(jira_name__icontains=value) | Q(local_name__icontains=value))
+
+    def filter_has_ams_level(self, queryset, name, value):
+        # Only act when the param is explicitly true — false/absent both mean
+        # "no filter", so /api/organizations/?has_ams_level=false returns
+        # everything (same as omitting the param).
+        if value:
+            return queryset.filter(ams_level__isnull=False)
+        return queryset
 
 
 class OrganizationViewSet(

@@ -2,9 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { listOrganizations } from '../api'
-import type { AmsLevel, Organization } from '../types'
-
-const AMS_LEVELS: AmsLevel[] = ['Essential', 'Enhanced', 'Expert']
+import type { Organization } from '../types'
 
 export function CustomersPage() {
   const [items, setItems] = useState<Organization[]>([])
@@ -12,13 +10,19 @@ export function CustomersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [q, setQ] = useState('')
-  const [amsLevel, setAmsLevel] = useState<string>('')
+  // Default behavior: hide customers without an AMS level, since the AMS
+  // team only deals with contracted customers. Uncheck to see everyone
+  // (e.g. when triaging a newly-synced org that needs a level assigned).
+  const [hideUnassigned, setHideUnassigned] = useState(true)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    listOrganizations({ q: q || undefined, ams_level: amsLevel || undefined })
+    listOrganizations({
+      q: q || undefined,
+      has_ams_level: hideUnassigned ? true : undefined,
+    })
       .then((data) => {
         if (cancelled) return
         setItems(data.results)
@@ -35,7 +39,7 @@ export function CustomersPage() {
     return () => {
       cancelled = true
     }
-  }, [q, amsLevel])
+  }, [q, hideUnassigned])
 
   return (
     <div>
@@ -51,14 +55,14 @@ export function CustomersPage() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <select className="input" value={amsLevel} onChange={(e) => setAmsLevel(e.target.value)}>
-          <option value="">All AMS Levels</option>
-          {AMS_LEVELS.map((l) => (
-            <option key={l} value={l}>
-              {l}
-            </option>
-          ))}
-        </select>
+        <label className="filter-checkbox">
+          <input
+            type="checkbox"
+            checked={hideUnassigned}
+            onChange={(e) => setHideUnassigned(e.target.checked)}
+          />
+          Hide customers without AMS level
+        </label>
       </div>
 
       {error && <div className="error-banner">Error: {error}</div>}

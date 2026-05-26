@@ -662,3 +662,17 @@
   border-radius: 4px;
   font-size: 13px;
 }
+
+/* Inline checkbox label used in the Customers page filter bar. */
+.filter-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 13px;
+  color: var(--color-text-secondary, #555);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.filter-checkbox input[type="checkbox"] {
+  cursor: pointer;
+}
