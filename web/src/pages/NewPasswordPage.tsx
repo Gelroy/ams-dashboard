@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 
 import { respondToNewPassword } from '../api'
-import { setToken } from '../auth'
+import { setTokens } from '../auth'
 
 interface ChallengeState {
   session: string
@@ -36,8 +36,9 @@ export function NewPasswordPage() {
     try {
       const resp = await respondToNewPassword(state!.session, state!.username, newPassword)
       // See LoginPage.tsx — id_token (not access_token) is what Django's
-      // CognitoJWTAuthentication can verify.
-      setToken(resp.id_token)
+      // CognitoJWTAuthentication can verify. Refresh token is captured so
+      // silent refresh works after the new password is set.
+      setTokens(resp.id_token, resp.refresh_token ?? null)
       navigate('/', { replace: true })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Could not set new password.')

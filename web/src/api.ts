@@ -16,30 +16,49 @@ import type {
   SoftwareVersionStatus,
 } from './types'
 
-import { clearTokenAndRedirectToLogin, getToken } from './auth'
+import { clearTokenAndRedirectToLogin, getToken, tryRefresh } from './auth'
 
 const API_BASE = '/api'
 
-// Paths exempt from the 401 → /login bounce: the login flow itself, where a
-// 401 means "bad credentials" and should surface to the caller, not redirect
-// the user to a page they're already on.
-const AUTH_PATHS = new Set(['/auth/login', '/auth/challenge'])
+// Paths exempt from the silent-refresh / 401-redirect dance: the auth flow
+// endpoints themselves. A 401 from /auth/login means "bad credentials" and
+// should surface to the caller, not redirect to a page they're already on.
+const AUTH_PATHS = new Set(['/auth/login', '/auth/challenge', '/auth/refresh'])
+
+function buildHeaders(init: RequestInit | undefined, token: string | null): HeadersInit {
+  return {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(init?.headers ?? {}),
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getToken()
-  const r = await fetch(`${API_BASE}${path}`, {
+  let r = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
+    headers: buildHeaders(init, getToken()),
   })
+
+  // Silent refresh: on a 401 to a non-auth endpoint, try minting a new
+  // id_token from the refresh_token and retry the original call. If the
+  // refresh succeeds the user never sees an interruption; if it fails (no
+  // refresh token, Cognito rejected it, etc.) we fall through to the
+  // login bounce.
   if (r.status === 401 && !AUTH_PATHS.has(path)) {
-    clearTokenAndRedirectToLogin()
-    throw new Error('Unauthorized')
+    const newToken = await tryRefresh()
+    if (newToken) {
+      r = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        headers: buildHeaders(init, newToken),
+      })
+    }
+    if (r.status === 401) {
+      clearTokenAndRedirectToLogin()
+      throw new Error('Unauthorized')
+    }
   }
+
   if (!r.ok) {
     let detail = ''
     try {

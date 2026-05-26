@@ -182,3 +182,52 @@ def challenge_new_password(request: Request) -> Response:
         )
 
     return Response(_tokens_payload(resp["AuthenticationResult"]))
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def refresh(request: Request) -> Response:
+    """POST {refresh_token} → fresh id_token + access_token without re-login.
+
+    Powers the SPA's "silent refresh" — when a bearer call returns 401, the
+    SPA calls this with the long-lived refresh_token (30 days by default in
+    our Cognito app client) and gets a new id_token to retry with. Only
+    bounces to /login if the refresh token itself is rejected.
+
+    Cognito's REFRESH_TOKEN_AUTH flow doesn't issue a new refresh_token, so
+    we never need to update the SPA's stored refresh — only the id/access.
+    """
+    refresh_token = request.data.get("refresh_token")
+    if not refresh_token:
+        return Response(
+            {"detail": "refresh_token is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not settings.COGNITO_APP_CLIENT_ID:
+        return Response(
+            {"detail": "Cognito client id not configured on the server."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    try:
+        resp = _cognito_client().initiate_auth(
+            AuthFlow="REFRESH_TOKEN_AUTH",
+            ClientId=settings.COGNITO_APP_CLIENT_ID,
+            AuthParameters={"REFRESH_TOKEN": refresh_token},
+        )
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "UnknownError")
+        if code == "NotAuthorizedException":
+            # Refresh token revoked, expired, or simply wrong.
+            return Response(
+                {"detail": "Refresh token is no longer valid. Please log in again."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        logger.exception("Cognito REFRESH_TOKEN_AUTH failed: %s", code)
+        return Response({"detail": code}, status=status.HTTP_400_BAD_REQUEST)
+
+    # AuthenticationResult on a refresh response carries IdToken + AccessToken
+    # but no RefreshToken — _tokens_payload handles that with its conditional
+    # spread, so the SPA receives just {id_token, access_token, ...}.
+    return Response(_tokens_payload(resp["AuthenticationResult"]))

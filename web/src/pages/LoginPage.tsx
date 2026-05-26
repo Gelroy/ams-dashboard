@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { isNewPasswordChallenge, login } from '../api'
-import { setToken } from '../auth'
+import { setTokens } from '../auth'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -27,9 +27,9 @@ export function LoginPage() {
       }
       // Send the id_token (not access_token) because Django's
       // CognitoJWTAuthentication verifies the `aud` claim, which Cognito only
-      // sets on id_tokens. Access tokens carry `client_id` instead and would
-      // fail aud verification → 401 → login loop.
-      setToken(resp.id_token)
+      // sets on id_tokens. Refresh token is stored too so api.ts can silently
+      // refresh the id_token when it expires (every 60 min by default).
+      setTokens(resp.id_token, resp.refresh_token ?? null)
       navigate('/', { replace: true })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Login failed')

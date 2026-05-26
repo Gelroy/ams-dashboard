@@ -2,7 +2,11 @@ from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path, re_path
 
-from .auth_views import challenge_new_password, login as auth_login
+from .auth_views import (
+    challenge_new_password,
+    login as auth_login,
+    refresh as auth_refresh,
+)
 from .spa import spa_index
 
 
@@ -16,6 +20,7 @@ urlpatterns = [
     # Auth endpoints — public; they exchange creds for Cognito JWTs.
     path("api/auth/login", auth_login, name="auth-login"),
     path("api/auth/challenge", challenge_new_password, name="auth-challenge"),
+    path("api/auth/refresh", auth_refresh, name="auth-refresh"),
     path("api/", include("customers.urls")),
     path("api/", include("software.urls")),
     path("api/", include("baskets.urls")),
