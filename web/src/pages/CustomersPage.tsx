@@ -76,20 +76,19 @@ export function CustomersPage() {
               <th>Zabbix</th>
               <th>Open Tickets</th>
               <th>Patching</th>
-              <th>Last JIRA Sync</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={6} className="state-cell">
+                <td colSpan={5} className="state-cell">
                   Loading…
                 </td>
               </tr>
             )}
             {!loading && items.length === 0 && (
               <tr>
-                <td colSpan={6} className="state-cell">
+                <td colSpan={5} className="state-cell">
                   No customers found.
                 </td>
               </tr>
@@ -111,7 +110,6 @@ export function CustomersPage() {
                   </td>
                   <td>{o.open_ticket_count ?? <span className="meta">—</span>}</td>
                   <td><PatchingBadge status={o.needs_patching} /></td>
-                  <td className="meta">{formatDate(o.jira_synced_at)}</td>
                 </tr>
               ))}
           </tbody>
@@ -129,10 +127,4 @@ function PatchingBadge({ status }: { status: 'yes' | 'no' | 'unknown' }) {
   if (status === 'yes') return <span className="badge patch-yes">Needs Patching</span>
   if (status === 'no') return <span className="badge patch-no">Up to Date</span>
   return <span className="meta">—</span>
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return d.toLocaleString()
 }
