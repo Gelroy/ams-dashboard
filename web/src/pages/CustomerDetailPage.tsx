@@ -6,6 +6,7 @@ import {
   deleteOrgDocument,
   getOrganization,
   listOrgUsers,
+  listPatchHistory,
   updateOrganization,
   updateOrgDocument,
   updateOrgUser,
@@ -17,6 +18,7 @@ import type {
   EditableOrgFields,
   Organization,
   OrgUser,
+  PatchHistoryEntry,
   ZabbixStatus,
 } from '../types'
 
@@ -80,6 +82,9 @@ export function CustomerDetailPage() {
       </CollapsibleSection>
       <CollapsibleSection title="Analytics">
         <CustomerAnalyticsSection orgId={id} />
+      </CollapsibleSection>
+      <CollapsibleSection title="Patch History">
+        <PatchHistorySection orgId={id} />
       </CollapsibleSection>
     </div>
   )
@@ -580,6 +585,135 @@ function UsersSection({
       )}
     </>
   )
+}
+
+function PatchHistorySection({ orgId }: { orgId: string }) {
+  const [entries, setEntries] = useState<PatchHistoryEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [envFilter, setEnvFilter] = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    setError(null)
+    listPatchHistory({ organization: orgId })
+      .then(setEntries)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [orgId])
+
+  if (loading) return <div className="state-cell">Loading…</div>
+  if (error) return <div className="error-banner">{error}</div>
+  if (entries.length === 0) {
+    return (
+      <div className="state-cell">
+        No patches recorded yet for this customer. Rows appear here when a
+        Patch Execution is finalized (one row per software release applied).
+      </div>
+    )
+  }
+
+  // Distinct envs for the filter dropdown.
+  const envNames = Array.from(new Set(entries.map((e) => e.environment_name))).sort()
+
+  // Apply env filter.
+  const visible = envFilter
+    ? entries.filter((e) => e.environment_name === envFilter)
+    : entries
+
+  // Group by software_name. Within each, sort ascending by patched_on so
+  // the row order *is* the evolution story (oldest → newest, .10 → .11 → .12).
+  const bySoftware = new Map<string, PatchHistoryEntry[]>()
+  for (const e of visible) {
+    const arr = bySoftware.get(e.software_name) ?? []
+    arr.push(e)
+    bySoftware.set(e.software_name, arr)
+  }
+  for (const arr of bySoftware.values()) {
+    arr.sort((a, b) => a.patched_on.localeCompare(b.patched_on))
+  }
+  const softwareNames = Array.from(bySoftware.keys()).sort()
+
+  return (
+    <>
+      <div className="filter-bar">
+        <label className="filter-checkbox">
+          Environment:
+          <select
+            className="input compact"
+            value={envFilter}
+            onChange={(e) => setEnvFilter(e.target.value)}
+            style={{ marginLeft: '0.5rem' }}
+          >
+            <option value="">All</option>
+            {envNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="meta">
+          {visible.length} patch{visible.length === 1 ? '' : 'es'} across{' '}
+          {softwareNames.length} software item{softwareNames.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {softwareNames.map((name) => {
+        const rows = bySoftware.get(name)!
+        return (
+          <div key={name} className="patch-history-software">
+            <h4 className="patch-history-heading">{name}</h4>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 130 }}>Date</th>
+                    <th style={{ width: 110 }}>Environment</th>
+                    <th>Release</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((e) => (
+                    <tr key={e.id}>
+                      <td>{formatPatchDate(e.patched_on)}</td>
+                      <td>{e.environment_name}</td>
+                      <td>
+                        {e.from_release ? (
+                          <>
+                            <span className="meta">{e.from_release}</span>
+                            {' → '}
+                            <strong>{e.to_release}</strong>
+                          </>
+                        ) : (
+                          <>
+                            <span className="meta">initial</span>
+                            {' → '}
+                            <strong>{e.to_release}</strong>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
+function formatPatchDate(iso: string): string {
+  // PatchHistory.patched_on is a date-only string (YYYY-MM-DD). Anchor to
+  // local midnight so Date() doesn't apply a TZ shift.
+  const d = new Date(iso + 'T00:00:00')
+  return d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
 function Field({

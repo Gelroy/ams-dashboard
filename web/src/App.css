@@ -720,3 +720,15 @@
 .error-boundary .error-reload:hover {
   background: rgb(153, 27, 27);
 }
+
+/* Patch History section on Customer Detail — one block per software,
+   chronological table inside each. */
+.patch-history-software + .patch-history-software {
+  margin-top: 1.5rem;
+}
+.patch-history-heading {
+  margin: 0 0 0.5rem;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary, #111);
+}
