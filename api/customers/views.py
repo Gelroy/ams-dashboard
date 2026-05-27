@@ -1,10 +1,10 @@
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, Value, When
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django_filters import rest_framework as filters
 from rest_framework import mixins, viewsets
 
-from .models import Environment, Organization, OrgDocument, OrgUser, Server
+from .models import AmsLevel, Environment, Organization, OrgDocument, OrgUser, Server
 from .serializers import (
     EnvironmentSerializer,
     OrganizationSerializer,
@@ -57,7 +57,22 @@ class OrganizationViewSet(
     filterset_class = OrganizationFilter
 
     def get_queryset(self):
-        return Organization.objects.all().order_by(Coalesce("local_name", "jira_name"))
+        # Static sort: Expert customers first, then Enhanced, then Essential,
+        # then any orgs without a level set (will only appear when the SPA's
+        # "Hide customers without AMS level" checkbox is unticked). Within
+        # each tier, alphabetical by display name.
+        ams_priority = Case(
+            When(ams_level=AmsLevel.EXPERT, then=Value(0)),
+            When(ams_level=AmsLevel.ENHANCED, then=Value(1)),
+            When(ams_level=AmsLevel.ESSENTIAL, then=Value(2)),
+            default=Value(3),
+            output_field=IntegerField(),
+        )
+        return (
+            Organization.objects.all()
+            .annotate(_ams_priority=ams_priority)
+            .order_by("_ams_priority", Coalesce("local_name", "jira_name"))
+        )
 
 
 class OrgUserViewSet(
