@@ -34,6 +34,37 @@ def format_elapsed(start: datetime, end: datetime) -> str:
 
 
 @transaction.atomic
+def resync_pristine_executions(plan: PatchPlan) -> list:
+    """Re-snapshot active executions linked to `plan` whose work has not yet
+    started. Returns the list of executions actually re-snapped.
+
+    "Not yet started" = no PatchExecutionStep on that execution has
+    started_at set. The moment any step has been marked Done (which sets
+    started_at as a side effect, even before the step's finished_at) the
+    execution becomes "in flight" and we leave its snapshot alone to
+    preserve the audit trail of what was already worked on.
+
+    Called from signals on PatchGroupStep and PatchPlanGroup change — if a
+    plan author edits the runbook (added/removed/reordered a group, or
+    edited a step in a group used by the plan), pristine executions pick
+    up the new steps automatically.
+    """
+    resynced: list = []
+    actives = PatchExecution.objects.filter(
+        patch_plan=plan,
+        status=PatchExecutionStatus.ACTIVE,
+        deleted_at__isnull=True,
+    )
+    for execution in actives:
+        if execution.steps.filter(started_at__isnull=False).exists():
+            continue
+        execution.steps.all().delete()
+        snapshot_steps_from_plan(execution, plan)
+        resynced.append(execution)
+    return resynced
+
+
+@transaction.atomic
 def snapshot_steps_from_plan(execution: PatchExecution, plan: PatchPlan | None) -> int:
     """Copy each step of each Group in the Plan (in order) into execution_steps."""
     if plan is None:
