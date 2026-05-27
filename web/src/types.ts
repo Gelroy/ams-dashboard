@@ -216,6 +216,7 @@ export interface PatchExecution {
   environment: string
   environment_name: string
   status: PatchExecutionStatus
+  planned_date: string | null
   patch_date: string | null
   started_at: string | null
   completed_at: string | null

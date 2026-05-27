@@ -538,10 +538,21 @@ export function createPatchExecution(payload: {
   environment: string
   basket: string
   patch_plan?: string | null
+  planned_date?: string | null
 }): Promise<import('./types').PatchExecution> {
   return request(`/patch-executions/`, {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export function updatePatchExecution(
+  id: string,
+  patch: { planned_date?: string | null },
+): Promise<import('./types').PatchExecution> {
+  return request(`/patch-executions/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
   })
 }
 

@@ -103,6 +103,7 @@ class PatchExecutionSerializer(serializers.ModelSerializer):
             "environment",
             "environment_name",
             "status",
+            "planned_date",
             "patch_date",
             "started_at",
             "completed_at",

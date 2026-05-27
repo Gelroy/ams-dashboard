@@ -111,6 +111,10 @@ class PatchExecution(SoftDeleteModel):
     status = models.CharField(
         max_length=12, choices=PatchExecutionStatus.choices, default=PatchExecutionStatus.ACTIVE
     )
+    # Date the team plans to perform the patch. Settable on create + editable
+    # later; distinct from patch_date (below) which is the day the execution
+    # actually started running.
+    planned_date = models.DateField(null=True, blank=True)
     patch_date = models.DateField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)

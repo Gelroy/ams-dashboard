@@ -18,6 +18,7 @@ import {
   listPatchPlans,
   markStepDone,
   removePatchPlanGroup,
+  updatePatchExecution,
   updatePatchGroup,
   updatePatchGroupStep,
   updatePatchPlan,
@@ -566,6 +567,7 @@ function AddExecutionForm({
   const [orgId, setOrgId] = useState('')
   const [envId, setEnvId] = useState('')
   const [basketId, setBasketId] = useState('')
+  const [plannedDate, setPlannedDate] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [orgEnvs, setOrgEnvs] = useState<{ id: string; name: string }[]>([])
@@ -593,6 +595,7 @@ function AddExecutionForm({
         environment: envId,
         basket: basketId,
         patch_plan: matchingPlan?.id ?? null,
+        planned_date: plannedDate || null,
       })
       onAdded()
     } catch (e) {
@@ -645,6 +648,14 @@ function AddExecutionForm({
             </option>
           ))}
         </select>
+        <input
+          className="input compact"
+          type="date"
+          value={plannedDate}
+          onChange={(e) => setPlannedDate(e.target.value)}
+          title="Planned date (optional)"
+          aria-label="Planned date"
+        />
         <button className="btn btn-primary" disabled={busy || !orgId || !envId || !basketId} onClick={submit}>
           Create
         </button>
@@ -671,6 +682,14 @@ function ExecutionCard({
   const [open, setOpen] = useState(true)
   const [aborting, setAborting] = useState(false)
   const [abortNotes, setAbortNotes] = useState('')
+  const [plannedDate, setPlannedDate] = useState(execution.planned_date ?? '')
+  const [savingPlanned, setSavingPlanned] = useState(false)
+  const [plannedError, setPlannedError] = useState<string | null>(null)
+
+  // Keep local state in sync when the parent refreshes the execution.
+  useEffect(() => {
+    setPlannedDate(execution.planned_date ?? '')
+  }, [execution.planned_date])
 
   const doneCount = execution.steps.filter((s) => s.done).length
   const total = execution.steps.length
@@ -685,6 +704,20 @@ function ExecutionCard({
     setAborting(false)
     setAbortNotes('')
     onChanged()
+  }
+
+  const savePlanned = (next: string) => {
+    const normalized = next || null
+    if (normalized === (execution.planned_date ?? null)) return
+    setSavingPlanned(true)
+    setPlannedError(null)
+    updatePatchExecution(execution.id, { planned_date: normalized })
+      .then(() => onChanged())
+      .catch((e: Error) => {
+        setPlannedError(e.message)
+        setPlannedDate(execution.planned_date ?? '') // rollback on error
+      })
+      .finally(() => setSavingPlanned(false))
   }
 
   return (
@@ -710,6 +743,25 @@ function ExecutionCard({
               <>
                 {' · '}Started {new Date(execution.started_at!).toLocaleString()}
               </>
+            )}
+          </div>
+
+          <div className="add-row" style={{ marginBottom: 8 }}>
+            <label className="field-label" htmlFor={`planned-${execution.id}`}>
+              Planned date
+            </label>
+            <input
+              id={`planned-${execution.id}`}
+              className="input compact"
+              type="date"
+              value={plannedDate}
+              disabled={savingPlanned}
+              onChange={(e) => setPlannedDate(e.target.value)}
+              onBlur={(e) => savePlanned(e.target.value)}
+            />
+            {savingPlanned && <span className="meta">saving…</span>}
+            {plannedError && (
+              <span className="error-text">{plannedError}</span>
             )}
           </div>
 
