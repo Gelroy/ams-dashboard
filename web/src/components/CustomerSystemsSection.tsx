@@ -451,22 +451,68 @@ function InstalledRow({
   catalog: Software[]
   onChanged: () => void
 }) {
+  // Optimistic copies of the two editable fields. The controlled <select>s
+  // render from these immediately on change, so the user sees their pick
+  // stick instead of snapping back during the PATCH round-trip. The optimistic
+  // value is overwritten when `entry` arrives fresh from the parent's refresh
+  // (useEffect below). On PATCH failure we surface the error and roll the
+  // pending value back to whatever the server actually has.
+  const [pendingVersion, setPendingVersion] = useState(entry.software_version)
+  const [pendingRelease, setPendingRelease] = useState<string | null>(
+    entry.software_release ?? null,
+  )
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setPendingVersion(entry.software_version)
+    setPendingRelease(entry.software_release ?? null)
+  }, [entry.software_version, entry.software_release])
+
   const sw = catalog.find((s) => s.id === entry.software)
   const versions = sw?.versions ?? []
-  const releases = versions.find((v) => v.id === entry.software_version)?.releases ?? []
+  const releases = versions.find((v) => v.id === pendingVersion)?.releases ?? []
+
+  const patch = (
+    body: { software_version?: string; software_release?: string | null },
+    optimistic: () => void,
+    rollback: () => void,
+  ) => {
+    optimistic()
+    setSaving(true)
+    setError(null)
+    updateInstalledSoftware(orgId, serverId, entry.id, body)
+      .then(() => onChanged())
+      .catch((e: Error) => {
+        rollback()
+        setError(e.message)
+      })
+      .finally(() => setSaving(false))
+  }
 
   return (
-    <div className="release-row">
+    <div className="release-row" style={{ flexWrap: 'wrap' }}>
       <strong style={{ width: 180 }}>{entry.software_name}</strong>
       <select
         className="input compact"
-        value={entry.software_version}
-        onChange={(e) =>
-          updateInstalledSoftware(orgId, serverId, entry.id, {
-            software_version: e.target.value,
-            software_release: null,
-          }).then(onChanged)
-        }
+        value={pendingVersion}
+        disabled={saving}
+        onChange={(e) => {
+          const newVersionId = e.target.value
+          const prevVersion = pendingVersion
+          const prevRelease = pendingRelease
+          patch(
+            { software_version: newVersionId, software_release: null },
+            () => {
+              setPendingVersion(newVersionId)
+              setPendingRelease(null)
+            },
+            () => {
+              setPendingVersion(prevVersion)
+              setPendingRelease(prevRelease)
+            },
+          )
+        }}
       >
         {versions.map((v) => (
           <option key={v.id} value={v.id}>
@@ -476,12 +522,17 @@ function InstalledRow({
       </select>
       <select
         className="input compact"
-        value={entry.software_release ?? ''}
-        onChange={(e) =>
-          updateInstalledSoftware(orgId, serverId, entry.id, {
-            software_release: e.target.value || null,
-          }).then(onChanged)
-        }
+        value={pendingRelease ?? ''}
+        disabled={saving}
+        onChange={(e) => {
+          const newReleaseId = e.target.value || null
+          const prevRelease = pendingRelease
+          patch(
+            { software_release: newReleaseId },
+            () => setPendingRelease(newReleaseId),
+            () => setPendingRelease(prevRelease),
+          )
+        }}
       >
         <option value="">— release —</option>
         {releases.map((r) => (
@@ -492,13 +543,22 @@ function InstalledRow({
       </select>
       <button
         className="btn-icon"
+        disabled={saving}
         onClick={() => {
           if (window.confirm(`Remove ${entry.software_name}?`))
-            removeInstalledSoftware(orgId, serverId, entry.id).then(onChanged)
+            removeInstalledSoftware(orgId, serverId, entry.id)
+              .then(onChanged)
+              .catch((e: Error) => setError(e.message))
         }}
       >
         ×
       </button>
+      {saving && <span className="meta">saving…</span>}
+      {error && (
+        <span className="error-banner" style={{ flexBasis: '100%', marginTop: '0.25rem' }}>
+          {error}
+        </span>
+      )}
     </div>
   )
 }
