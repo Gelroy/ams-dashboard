@@ -120,6 +120,12 @@ class OrgUser(SoftDeleteModel):
     role = models.TextField(null=True, blank=True)
     alerts_enabled = models.BooleanField(default=False)
     is_primary = models.BooleanField(default=False)
+    # Local-only display flag — lets the team hide JIRA-synced users they
+    # don't actively work with from the Customer Detail Users table, while
+    # keeping the row intact so it stays in sync if the user becomes
+    # relevant again later. Toggled via the UI; sync_jira_users never
+    # writes this field.
+    is_hidden = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

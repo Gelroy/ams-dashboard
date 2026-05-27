@@ -76,6 +76,7 @@ class OrgUserSerializer(serializers.ModelSerializer):
             "role",
             "alerts_enabled",
             "is_primary",
+            "is_hidden",
         ]
         read_only_fields = [
             "id",

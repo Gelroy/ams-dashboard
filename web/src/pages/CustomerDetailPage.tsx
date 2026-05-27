@@ -467,6 +467,14 @@ function UsersSection({
 }) {
   const [savingId, setSavingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // JIRA syncs every user assigned to an org, but the AMS team only deals
+  // with a subset. Hidden rows stay in the DB (so sync keeps them current
+  // in case they become relevant again) but disappear from the table until
+  // this is toggled on.
+  const [showHidden, setShowHidden] = useState(false)
+
+  const visibleUsers = showHidden ? users : users.filter((u) => !u.is_hidden)
+  const hiddenCount = users.filter((u) => u.is_hidden).length
 
   const patchUser = (userId: string, patch: Partial<OrgUser>) => {
     // Optimistic update
@@ -484,9 +492,29 @@ function UsersSection({
   return (
     <>
       {error && <div className="error-banner">{error}</div>}
+
+      <div className="filter-bar">
+        <label className="filter-checkbox">
+          <input
+            type="checkbox"
+            checked={showHidden}
+            onChange={(e) => setShowHidden(e.target.checked)}
+          />
+          Show hidden users
+          {hiddenCount > 0 && (
+            <span className="meta"> ({hiddenCount} hidden)</span>
+          )}
+        </label>
+      </div>
+
       {users.length === 0 ? (
         <div className="state-cell">
           No users synced yet. Run <code>python manage.py sync_jira_users</code>.
+        </div>
+      ) : visibleUsers.length === 0 ? (
+        <div className="state-cell">
+          All {users.length} users are hidden. Toggle &ldquo;Show hidden users&rdquo; above
+          to bring them back.
         </div>
       ) : (
         <div className="table-wrap">
@@ -498,11 +526,12 @@ function UsersSection({
                 <th>Role</th>
                 <th style={{ width: 80 }}>Alerts</th>
                 <th style={{ width: 80 }}>Primary</th>
+                <th style={{ width: 60 }}>Hide</th>
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
-                <tr key={u.id}>
+              {visibleUsers.map((u) => (
+                <tr key={u.id} style={u.is_hidden ? { opacity: 0.5 } : undefined}>
                   <td>
                     <strong>{u.display_name || '—'}</strong>
                     {savingId === u.id && <span className="meta"> · saving…</span>}
@@ -533,6 +562,14 @@ function UsersSection({
                       type="checkbox"
                       checked={u.is_primary}
                       onChange={(e) => patchUser(u.id, { is_primary: e.target.checked })}
+                    />
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={u.is_hidden}
+                      onChange={(e) => patchUser(u.id, { is_hidden: e.target.checked })}
+                      title={u.is_hidden ? 'Currently hidden — uncheck to restore' : 'Hide this user from the default view'}
                     />
                   </td>
                 </tr>

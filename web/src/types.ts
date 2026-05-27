@@ -44,6 +44,7 @@ export interface OrgUser {
   role: string | null
   alerts_enabled: boolean
   is_primary: boolean
+  is_hidden: boolean
 }
 
 export interface Paginated<T> {
@@ -58,7 +59,10 @@ export type EditableOrgFields = Pick<
   'local_name' | 'ams_level' | 'zabbix_status' | 'help_desk_phone' | 'notes'
 >
 
-export type EditableUserFields = Pick<OrgUser, 'role' | 'alerts_enabled' | 'is_primary'>
+export type EditableUserFields = Pick<
+  OrgUser,
+  'role' | 'alerts_enabled' | 'is_primary' | 'is_hidden'
+>
 
 export interface Environment {
   id: string
