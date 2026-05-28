@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import {
   completeActivity,
@@ -6,6 +7,7 @@ import {
   deleteActivity,
   listActivities,
   listOrganizations,
+  listPatchExecutions,
   listStaff,
   updateActivity,
 } from '../api'
@@ -15,6 +17,7 @@ import type {
   ActivityStatus,
   ActivityType,
   Organization,
+  PatchExecution,
   Staff,
 } from '../types'
 
@@ -25,6 +28,7 @@ export function ActivitiesPage() {
   const [items, setItems] = useState<Activity[]>([])
   const [orgs, setOrgs] = useState<Organization[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
+  const [plannedExecs, setPlannedExecs] = useState<PatchExecution[]>([])
   const [filter, setFilter] = useState<ActivityStatus | 'all'>('scheduled')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -39,16 +43,33 @@ export function ActivitiesPage() {
       // Customer dropdown in the Add form is fed by this list.
       listOrganizations({ limit: 200, has_ams_level: true }),
       listStaff(),
+      listPatchExecutions('active'),
     ])
-      .then(([a, o, s]) => {
+      .then(([a, o, s, execs]) => {
         setItems(a)
         setOrgs(o.results)
         setStaff(s)
+        // Only active executions with a planned date show alongside
+        // activities, and only when the filter isn't "Completed".
+        setPlannedExecs(execs.filter((e) => e.planned_date))
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }
   useEffect(refresh, [filter])
+
+  // Interleave planned patch executions with activities by date. Hidden when
+  // the filter is "Completed" (planned executions aren't completed activities).
+  const showExecs = filter !== 'completed'
+  const merged: Array<
+    { kind: 'activity'; date: string; activity: Activity }
+    | { kind: 'exec'; date: string; exec: PatchExecution }
+  > = [
+    ...items.map((a) => ({ kind: 'activity' as const, date: a.scheduled_at, activity: a })),
+    ...(showExecs
+      ? plannedExecs.map((e) => ({ kind: 'exec' as const, date: e.planned_date!, exec: e }))
+      : []),
+  ].sort((x, y) => x.date.localeCompare(y.date))
 
   return (
     <div>
@@ -85,15 +106,49 @@ export function ActivitiesPage() {
 
       {error && <div className="error-banner">{error}</div>}
       {loading && <div className="state-cell">Loading…</div>}
-      {!loading && items.length === 0 && (
+      {!loading && merged.length === 0 && (
         <div className="state-cell">No activities for this filter.</div>
       )}
 
-      {items.map((a) => (
-        <ActivityCard key={a.id} activity={a} orgs={orgs} staff={staff} onChanged={refresh} />
-      ))}
+      {merged.map((row) =>
+        row.kind === 'activity' ? (
+          <ActivityCard
+            key={`a-${row.activity.id}`}
+            activity={row.activity}
+            orgs={orgs}
+            staff={staff}
+            onChanged={refresh}
+          />
+        ) : (
+          <PatchExecRow key={`e-${row.exec.id}`} exec={row.exec} />
+        ),
+      )}
     </div>
   )
+}
+
+/** Read-only row for a planned patch execution, interleaved with activities.
+ *  Links to the Patch Execution page; not editable from here. */
+function PatchExecRow({ exec }: { exec: PatchExecution }) {
+  return (
+    <Link to="/patch-execution" className="catalog-card patch-exec-row">
+      <div className="catalog-row">
+        <span className="badge patch-yes">Patch</span>
+        <strong>
+          {exec.organization_name} — {exec.environment_name}
+        </strong>
+        <span className="meta">{exec.basket_name}</span>
+        <span className="meta" style={{ marginLeft: 'auto' }}>
+          {exec.planned_date ? formatExecDate(exec.planned_date) : 'TBD'}
+        </span>
+      </div>
+    </Link>
+  )
+}
+
+function formatExecDate(iso: string): string {
+  const d = new Date(iso + 'T00:00:00')
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 function ActivityCard({

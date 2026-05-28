@@ -102,6 +102,7 @@ function EventRow({ event }: { event: CriticalEvent }) {
       <span className="critical-kind">
         {event.kind === 'cert' && 'Cert'}
         {event.kind === 'patch' && 'Patch'}
+        {event.kind === 'patch_planned' && 'Planned'}
         {event.kind === 'activity' && (event.type ?? 'Activity')}
       </span>
       <span>{event.label}</span>

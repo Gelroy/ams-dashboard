@@ -200,3 +200,32 @@ def abort_execution(execution: PatchExecution, notes: str) -> PatchExecutionAbor
     execution.patch_date = None
     execution.save(update_fields=["started_at", "total_time", "patch_date"])
     return abort
+
+
+@transaction.atomic
+def reset_execution(execution: PatchExecution) -> None:
+    """Restart an execution from scratch without recording an abort attempt.
+
+    Clears every step's progress (done / started_at / finished_at /
+    total_time), resets the execution back to Active, and clears its run
+    timestamps. Keeps the step list itself, the planned_date, and any
+    prior abort history intact — this is a clean "start over", not a
+    teardown. Use abort_execution instead when you want the attempt logged.
+    """
+    execution.steps.update(
+        done=False, started_at=None, finished_at=None, total_time=None
+    )
+    execution.status = PatchExecutionStatus.ACTIVE
+    execution.started_at = None
+    execution.completed_at = None
+    execution.total_time = None
+    execution.patch_date = None
+    execution.save(
+        update_fields=[
+            "status",
+            "started_at",
+            "completed_at",
+            "total_time",
+            "patch_date",
+        ]
+    )

@@ -7,6 +7,7 @@ import {
   createPatchGroup,
   createPatchGroupStep,
   createPatchPlan,
+  deletePatchExecution,
   deletePatchGroup,
   deletePatchGroupStep,
   deletePatchPlan,
@@ -18,6 +19,8 @@ import {
   listPatchPlans,
   markStepDone,
   removePatchPlanGroup,
+  resetPatchExecution,
+  setStepElapsed,
   updatePatchExecution,
   updatePatchGroup,
   updatePatchGroupStep,
@@ -679,17 +682,48 @@ function ExecutionCard({
   execution: PatchExecution
   onChanged: () => void
 }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false) // collapsed by default
   const [aborting, setAborting] = useState(false)
   const [abortNotes, setAbortNotes] = useState('')
   const [plannedDate, setPlannedDate] = useState(execution.planned_date ?? '')
+  const [editingPlanned, setEditingPlanned] = useState(false)
   const [savingPlanned, setSavingPlanned] = useState(false)
   const [plannedError, setPlannedError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   // Keep local state in sync when the parent refreshes the execution.
   useEffect(() => {
     setPlannedDate(execution.planned_date ?? '')
   }, [execution.planned_date])
+
+  const doReset = () => {
+    if (!window.confirm('Reset this execution? All step progress will be cleared and it returns to Active. Step list and planned date are kept.')) return
+    setBusy(true)
+    setActionError(null)
+    resetPatchExecution(execution.id)
+      .then(() => onChanged())
+      .catch((e: Error) => setActionError(e.message))
+      .finally(() => setBusy(false))
+  }
+
+  const doDelete = () => {
+    if (!window.confirm('Delete this execution permanently? This cannot be undone.')) return
+    setBusy(true)
+    setActionError(null)
+    deletePatchExecution(execution.id)
+      .then(() => onChanged())
+      .catch((e: Error) => setActionError(e.message))
+      .finally(() => setBusy(false))
+  }
+
+  const saveStepElapsed = (stepId: string, value: string, current: string | null) => {
+    const next = value.trim() || null
+    if (next === (current ?? null)) return
+    setStepElapsed(execution.id, stepId, next)
+      .then(() => onChanged())
+      .catch((e: Error) => setActionError(e.message))
+  }
 
   const doneCount = execution.steps.filter((s) => s.done).length
   const total = execution.steps.length
@@ -732,7 +766,36 @@ function ExecutionCard({
         <span className="meta">
           {execution.basket_name} · {doneCount}/{total} steps
         </span>
-        <span className="badge patch-yes" style={{ marginLeft: 'auto' }}>Active</span>
+        {/* Planned date — no label; blank shows TBD; click to edit inline. */}
+        {editingPlanned ? (
+          <input
+            className="input compact"
+            type="date"
+            autoFocus
+            value={plannedDate}
+            disabled={savingPlanned}
+            onChange={(e) => setPlannedDate(e.target.value)}
+            onBlur={(e) => {
+              savePlanned(e.target.value)
+              setEditingPlanned(false)
+            }}
+            onClick={(e) => e.stopPropagation()}
+            style={{ marginLeft: 'auto' }}
+          />
+        ) : (
+          <span
+            className="meta"
+            style={{ marginLeft: 'auto', cursor: 'pointer' }}
+            title="Planned date — click to edit"
+            onClick={(e) => {
+              e.stopPropagation()
+              setEditingPlanned(true)
+            }}
+          >
+            {execution.planned_date ? formatPlannedDate(execution.planned_date) : 'TBD'}
+          </span>
+        )}
+        <span className="badge patch-yes">Active</span>
       </div>
 
       {open && (
@@ -746,23 +809,22 @@ function ExecutionCard({
             )}
           </div>
 
+          {plannedError && <div className="error-banner">{plannedError}</div>}
+          {actionError && <div className="error-banner">{actionError}</div>}
+
           <div className="add-row" style={{ marginBottom: 8 }}>
-            <label className="field-label" htmlFor={`planned-${execution.id}`}>
-              Planned date
-            </label>
-            <input
-              id={`planned-${execution.id}`}
-              className="input compact"
-              type="date"
-              value={plannedDate}
-              disabled={savingPlanned}
-              onChange={(e) => setPlannedDate(e.target.value)}
-              onBlur={(e) => savePlanned(e.target.value)}
-            />
-            {savingPlanned && <span className="meta">saving…</span>}
-            {plannedError && (
-              <span className="error-text">{plannedError}</span>
-            )}
+            <button className="btn" disabled={busy} onClick={doReset}>
+              Reset
+            </button>
+            <button
+              className="btn"
+              style={{ color: '#b91c1c' }}
+              disabled={busy}
+              onClick={doDelete}
+            >
+              Delete
+            </button>
+            {busy && <span className="meta">working…</span>}
           </div>
 
           {aborting ? (
@@ -846,7 +908,20 @@ function ExecutionCard({
                       <td>{s.description}</td>
                       <td>{s.est_time ?? '—'}</td>
                       <td>{action}</td>
-                      <td className="meta">{s.total_time ?? '—'}</td>
+                      <td>
+                        {/* Editable: the elapsed value is auto-computed when
+                            a step is marked Done, but can be corrected by
+                            hand afterward. Uncontrolled input keyed by the
+                            stored value so external refreshes update it. */}
+                        <input
+                          key={`${s.id}-${s.total_time ?? ''}`}
+                          className="input compact"
+                          style={{ width: 90 }}
+                          defaultValue={s.total_time ?? ''}
+                          placeholder="—"
+                          onBlur={(e) => saveStepElapsed(s.id, e.target.value, s.total_time)}
+                        />
+                      </td>
                     </tr>
                   )
                 })}
@@ -857,6 +932,13 @@ function ExecutionCard({
       )}
     </div>
   )
+}
+
+function formatPlannedDate(iso: string): string {
+  // planned_date is a date-only string (YYYY-MM-DD); anchor to local
+  // midnight so the displayed day doesn't shift across timezones.
+  const d = new Date(iso + 'T00:00:00')
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 function AddPatchPlanForm({ onAdded }: { onAdded: () => void }) {

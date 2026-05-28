@@ -23,7 +23,12 @@ from .serializers import (
     PatchPlanGroupSerializer,
     PatchPlanSerializer,
 )
-from .services import abort_execution, mark_step_done, snapshot_steps_from_plan
+from .services import (
+    abort_execution,
+    mark_step_done,
+    reset_execution,
+    snapshot_steps_from_plan,
+)
 
 
 class PatchGroupViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
@@ -101,6 +106,32 @@ class PatchExecutionViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
         if not notes:
             raise ValidationError({"notes": "A reason is required."})
         abort_execution(execution, notes)
+        execution.refresh_from_db()
+        return Response(self.get_serializer(execution).data)
+
+    @action(detail=True, methods=["post"])
+    def reset(self, request, pk=None):
+        """Restart the execution from scratch (no abort recorded)."""
+        execution = self.get_object()
+        reset_execution(execution)
+        execution.refresh_from_db()
+        return Response(self.get_serializer(execution).data)
+
+    @action(
+        detail=True,
+        methods=["patch"],
+        url_path=r"steps/(?P<step_id>[^/.]+)/elapsed",
+    )
+    def set_step_elapsed(self, request, pk=None, step_id=None):
+        """Manually correct a step's recorded elapsed time after the
+        automated value was posted. Body: {"total_time": "1h 5m 0s"}."""
+        execution = self.get_object()
+        step = get_object_or_404(PatchExecutionStep, pk=step_id, patch_execution=execution)
+        total_time = request.data.get("total_time")
+        # Allow clearing back to null, or setting an arbitrary string — this
+        # is a human-entered correction, not a parsed duration.
+        step.total_time = (total_time or "").strip() or None
+        step.save(update_fields=["total_time"])
         execution.refresh_from_db()
         return Response(self.get_serializer(execution).data)
 

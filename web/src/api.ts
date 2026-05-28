@@ -573,6 +573,27 @@ export function abortPatchExecution(
   })
 }
 
+export function resetPatchExecution(
+  executionId: string,
+): Promise<import('./types').PatchExecution> {
+  return request(`/patch-executions/${executionId}/reset/`, { method: 'POST' })
+}
+
+export function deletePatchExecution(executionId: string): Promise<void> {
+  return request<void>(`/patch-executions/${executionId}/`, { method: 'DELETE' })
+}
+
+export function setStepElapsed(
+  executionId: string,
+  stepId: string,
+  totalTime: string | null,
+): Promise<import('./types').PatchExecution> {
+  return request(`/patch-executions/${executionId}/steps/${stepId}/elapsed/`, {
+    method: 'PATCH',
+    body: JSON.stringify({ total_time: totalTime }),
+  })
+}
+
 // Patch History
 export function listPatchHistory(filter?: {
   organization?: string

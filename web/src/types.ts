@@ -300,7 +300,7 @@ export interface Activity {
 export interface CriticalEvent {
   date: string
   time: string | null
-  kind: 'activity' | 'cert' | 'patch'
+  kind: 'activity' | 'cert' | 'patch' | 'patch_planned'
   label: string
   source_kind: string
   source_id: string

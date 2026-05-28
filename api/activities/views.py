@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 
 from customers.models import Server
 from customers.views import SoftDeleteDestroyMixin
-from patching.models import PatchHistory
+from patching.models import PatchExecution, PatchExecutionStatus, PatchHistory
 
 from .models import Activity, ActivityStatus
 from .serializers import ActivitySerializer
@@ -122,6 +122,33 @@ class CriticalCalendarView(APIView):
                     "source_kind": "patch_history",
                     "source_id": str(p.id),
                     "organization_id": str(p.organization_id),
+                }
+            )
+
+        # Planned (not-yet-completed) patch executions with a planned_date set.
+        for pe in (
+            PatchExecution.objects.filter(
+                status=PatchExecutionStatus.ACTIVE,
+                deleted_at__isnull=True,
+                planned_date__isnull=False,
+                planned_date__gte=lookback_start,
+                planned_date__lt=end,
+            )
+            .select_related("organization", "environment", "basket")
+        ):
+            org = pe.organization
+            events.append(
+                {
+                    "date": pe.planned_date.isoformat(),
+                    "time": None,
+                    "kind": "patch_planned",
+                    "label": (
+                        f"Planned patch: {org.local_name or org.jira_name} "
+                        f"{pe.environment.name} — {pe.basket.name}"
+                    ),
+                    "source_kind": "patch_execution",
+                    "source_id": str(pe.id),
+                    "organization_id": str(org.id),
                 }
             )
 
