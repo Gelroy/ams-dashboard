@@ -614,7 +614,7 @@ function UsersSection({
               <tr>
                 <th>Name</th>
                 <th>Email</th>
-                <th>Role</th>
+                <th style={{ width: 120 }}>Role</th>
                 <th
                   style={{ width: 80, cursor: 'pointer' }}
                   onClick={() => copyEmailsForFlag('alerts_enabled', 'Alerts')}
@@ -650,6 +650,7 @@ function UsersSection({
                   <td>
                     <input
                       className="input compact"
+                      style={{ width: 100 }}
                       value={u.role ?? ''}
                       placeholder="—"
                       onChange={(e) =>
