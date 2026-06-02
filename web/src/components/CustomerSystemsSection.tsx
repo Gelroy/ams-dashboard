@@ -236,10 +236,13 @@ function ServerTable({
         <thead>
           <tr>
             <th style={{ width: 24 }}></th>
-            <th>Server</th>
+            {/* Fixed width on Server pushes the IP column right next to
+                it instead of letting the auto-layout stretch Server to
+                fill leftover space. Baskets gets the flex room instead. */}
+            <th style={{ width: 200 }}>Server</th>
             {/* IP address — header intentionally empty; the masked input
                 ###.###.###.### is self-evident. */}
-            <th style={{ width: 150 }}></th>
+            <th style={{ width: 140 }}></th>
             <th style={{ width: 90 }}>Env</th>
             <th>Baskets</th>
             <th style={{ width: 140 }}>Cert Expires</th>
@@ -303,6 +306,7 @@ function ServerRow({
         <td>
           <input
             className="input compact"
+            style={{ width: '100%' }}
             value={name}
             onChange={(e) => setName(e.target.value)}
             onBlur={() => {
@@ -313,6 +317,7 @@ function ServerRow({
         <td>
           <input
             className="input compact"
+            style={{ width: '100%' }}
             value={ip}
             placeholder="___.___.___.___"
             inputMode="numeric"
