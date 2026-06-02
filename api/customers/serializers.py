@@ -26,6 +26,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "display_name",
             "ams_level",
             "zabbix_status",
+            "country",
             "help_desk_phone",
             "roadmap",
             "notes",

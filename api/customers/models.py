@@ -36,6 +36,11 @@ class ZabbixStatus(models.TextChoices):
     ISSUE = "Issue", "Issue"
 
 
+class Country(models.TextChoices):
+    US = "US", "US"
+    CA = "CA", "CA"
+
+
 class Organization(SoftDeleteModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     jira_org_id = models.TextField()
@@ -44,6 +49,9 @@ class Organization(SoftDeleteModel):
     ams_level = models.CharField(max_length=16, choices=AmsLevel.choices, null=True, blank=True)
     zabbix_status = models.CharField(
         max_length=8, choices=ZabbixStatus.choices, null=True, blank=True
+    )
+    country = models.CharField(
+        max_length=2, choices=Country.choices, null=True, blank=True
     )
     help_desk_phone = models.TextField(null=True, blank=True)
     # Long-form strategic-planning notes — separate from the operational

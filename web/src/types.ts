@@ -1,5 +1,6 @@
 export type AmsLevel = 'Essential' | 'Enhanced' | 'Expert'
 export type ZabbixStatus = 'Good' | 'Issue'
+export type Country = 'US' | 'CA'
 
 export interface OrgDocument {
   id: string
@@ -24,6 +25,7 @@ export interface Organization {
   display_name: string
   ams_level: AmsLevel | null
   zabbix_status: ZabbixStatus | null
+  country: Country | null
   help_desk_phone: string | null
   roadmap: string | null
   notes: string | null
@@ -57,7 +59,13 @@ export interface Paginated<T> {
 
 export type EditableOrgFields = Pick<
   Organization,
-  'local_name' | 'ams_level' | 'zabbix_status' | 'help_desk_phone' | 'roadmap' | 'notes'
+  | 'local_name'
+  | 'ams_level'
+  | 'zabbix_status'
+  | 'country'
+  | 'help_desk_phone'
+  | 'roadmap'
+  | 'notes'
 >
 
 export type EditableUserFields = Pick<

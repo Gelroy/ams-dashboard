@@ -15,6 +15,7 @@ import { CustomerAnalyticsSection } from '../components/CustomerAnalyticsSection
 import { CustomerSystemsSection } from '../components/CustomerSystemsSection'
 import type {
   AmsLevel,
+  Country,
   EditableOrgFields,
   Organization,
   OrgUser,
@@ -24,6 +25,7 @@ import type {
 
 const AMS_LEVELS: AmsLevel[] = ['Essential', 'Enhanced', 'Expert']
 const ZABBIX_STATUSES: ZabbixStatus[] = ['Good', 'Issue']
+const COUNTRIES: Country[] = ['US', 'CA']
 
 export function CustomerDetailPage() {
   const { id = '' } = useParams<{ id: string }>()
@@ -138,6 +140,7 @@ function DetailsSection({
     local_name: org.local_name,
     ams_level: org.ams_level,
     zabbix_status: org.zabbix_status,
+    country: org.country,
     help_desk_phone: org.help_desk_phone,
     roadmap: org.roadmap,
     notes: org.notes,
@@ -196,6 +199,20 @@ function DetailsSection({
             {ZABBIX_STATUSES.map((s) => (
               <option key={s} value={s}>
                 {s}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Country">
+          <select
+            className="input"
+            value={draft.country ?? ''}
+            onChange={(e) => set('country', (e.target.value as Country) || null)}
+          >
+            <option value="">— Not set —</option>
+            {COUNTRIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
               </option>
             ))}
           </select>

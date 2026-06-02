@@ -76,19 +76,20 @@ export function CustomersPage() {
               <th>Zabbix</th>
               <th>Open Tickets</th>
               <th>Patching</th>
+              <th>Country</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={5} className="state-cell">
+                <td colSpan={6} className="state-cell">
                   Loading…
                 </td>
               </tr>
             )}
             {!loading && items.length === 0 && (
               <tr>
-                <td colSpan={5} className="state-cell">
+                <td colSpan={6} className="state-cell">
                   No customers found.
                 </td>
               </tr>
@@ -110,6 +111,7 @@ export function CustomersPage() {
                   </td>
                   <td>{o.open_ticket_count ?? <span className="meta">—</span>}</td>
                   <td><PatchingBadge status={o.needs_patching} /></td>
+                  <td>{o.country ?? <span className="meta">—</span>}</td>
                 </tr>
               ))}
           </tbody>
