@@ -238,6 +238,7 @@ function ServerTable({
             <th style={{ width: 24 }}></th>
             <th>Server</th>
             <th style={{ width: 90 }}>Env</th>
+            <th>Baskets</th>
             <th style={{ width: 140 }}>Cert Expires</th>
             <th style={{ width: 130 }}>Patching</th>
             <th style={{ width: 50 }}></th>
@@ -308,6 +309,11 @@ function ServerRow({
         <td>
           <span className="badge">{server.environment_name}</span>
         </td>
+        <td className="meta" style={{ fontSize: 11 }}>
+          {server.baskets.length === 0
+            ? '—'
+            : server.baskets.map((b) => b.name).join(', ')}
+        </td>
         <td>
           <input
             type="date"
@@ -327,7 +333,7 @@ function ServerRow({
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={6} className="server-detail-cell">
+          <td colSpan={7} className="server-detail-cell">
             <ServerDetailPanel
               server={server}
               baskets={baskets}
