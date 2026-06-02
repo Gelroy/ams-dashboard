@@ -560,9 +560,10 @@ function UsersSection({
     flag: 'alerts_enabled' | 'is_primary' | 'ams_report',
     label: string,
   ) => {
+    // Prefer the local override; fall back to the JIRA email.
     const emails = users
-      .filter((u) => u[flag] && u.email)
-      .map((u) => (u.email as string).trim())
+      .filter((u) => u[flag])
+      .map((u) => (u.local_email ?? u.email ?? '').trim())
       .filter(Boolean)
     if (emails.length === 0) {
       flashCopyMsg(`No users have ${label} checked.`)
@@ -649,10 +650,47 @@ function UsersSection({
               {visibleUsers.map((u) => (
                 <tr key={u.id} style={u.is_hidden ? { opacity: 0.5 } : undefined}>
                   <td>
-                    <strong>{u.display_name || '—'}</strong>
+                    <input
+                      key={`name-${u.id}-${u.local_display_name ?? ''}-${u.display_name ?? ''}`}
+                      className="input compact"
+                      defaultValue={u.local_display_name ?? u.display_name ?? ''}
+                      placeholder={u.display_name ?? '—'}
+                      title={
+                        u.display_name
+                          ? `JIRA: ${u.display_name}`
+                          : 'No JIRA display name'
+                      }
+                      onBlur={(e) => {
+                        const typed = e.target.value.trim()
+                        const desired = typed || null
+                        // Typing the JIRA value back == clearing the override.
+                        const normalized =
+                          desired !== null && desired === u.display_name ? null : desired
+                        if (normalized !== (u.local_display_name ?? null)) {
+                          patchUser(u.id, { local_display_name: normalized })
+                        }
+                      }}
+                    />
                     {savingId === u.id && <span className="meta"> · saving…</span>}
                   </td>
-                  <td className="meta">{u.email || '—'}</td>
+                  <td>
+                    <input
+                      key={`email-${u.id}-${u.local_email ?? ''}-${u.email ?? ''}`}
+                      className="input compact"
+                      defaultValue={u.local_email ?? u.email ?? ''}
+                      placeholder={u.email ?? '—'}
+                      title={u.email ? `JIRA: ${u.email}` : 'No JIRA email'}
+                      onBlur={(e) => {
+                        const typed = e.target.value.trim()
+                        const desired = typed || null
+                        const normalized =
+                          desired !== null && desired === u.email ? null : desired
+                        if (normalized !== (u.local_email ?? null)) {
+                          patchUser(u.id, { local_email: normalized })
+                        }
+                      }}
+                    />
+                  </td>
                   <td>
                     <input
                       className="input compact"

@@ -48,6 +48,10 @@ export interface OrgUser {
   jira_account_id: string
   display_name: string | null
   email: string | null
+  // Local overrides — when set, take precedence in the UI. JIRA-synced
+  // display_name / email remain visible via tooltip + as fallback.
+  local_display_name: string | null
+  local_email: string | null
   role: string | null
   alerts_enabled: boolean
   is_primary: boolean
@@ -75,7 +79,13 @@ export type EditableOrgFields = Pick<
 
 export type EditableUserFields = Pick<
   OrgUser,
-  'role' | 'alerts_enabled' | 'is_primary' | 'ams_report' | 'is_hidden'
+  | 'role'
+  | 'alerts_enabled'
+  | 'is_primary'
+  | 'ams_report'
+  | 'is_hidden'
+  | 'local_display_name'
+  | 'local_email'
 >
 
 export interface Environment {

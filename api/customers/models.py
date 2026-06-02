@@ -137,6 +137,13 @@ class OrgUser(SoftDeleteModel):
     jira_account_id = models.TextField()
     display_name = models.TextField(null=True, blank=True)
     email = models.TextField(null=True, blank=True)
+    # Local overrides — same pattern as Organization.local_name. When set
+    # they take precedence in the UI; the JIRA-synced value stays in
+    # display_name/email so it can be surfaced via tooltip and used as a
+    # fallback. sync_jira_users only writes display_name + email so these
+    # are never clobbered by a sync.
+    local_display_name = models.TextField(null=True, blank=True)
+    local_email = models.TextField(null=True, blank=True)
     role = models.TextField(null=True, blank=True)
     alerts_enabled = models.BooleanField(default=False)
     is_primary = models.BooleanField(default=False)

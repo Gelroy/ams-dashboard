@@ -119,6 +119,8 @@ class OrgUserSerializer(serializers.ModelSerializer):
             "jira_account_id",
             "display_name",
             "email",
+            "local_display_name",
+            "local_email",
             "role",
             "alerts_enabled",
             "is_primary",
