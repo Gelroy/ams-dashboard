@@ -28,6 +28,12 @@ Optional context:
                               on the VPC itself; set 1 for ~$33/mo NAT or 2
                               for HA NAT ~$66/mo, which moves tasks back to
                               private subnets).
+  - public_alb=true         : make the ALB internet-facing (default false:
+                              internal). Combine with -c acm_cert_arn=… to
+                              serve HTTPS at a real domain. Without a cert,
+                              the public ALB serves plain HTTP — only suitable
+                              for short-lived smoke tests; logins go over the
+                              wire in plaintext otherwise.
   - acm_cert_arn            : ACM cert in the same region for the ALB. If
                               empty, the ALB serves plain HTTP — fine for
                               initial smoke-testing on the corporate network.
@@ -117,6 +123,20 @@ class AmsDashboardStack(cdk.Stack):
                 "vpc_id and create_vpc=true are mutually exclusive — pick one."
             )
         cert_arn = self.node.try_get_context("acm_cert_arn") or ""
+        public_alb = str(self.node.try_get_context("public_alb") or "").lower() == "true"
+        if public_alb and not cert_arn:
+            # Refuse a public-on-HTTP deploy by default — logins (passwords +
+            # JWTs) would go over the wire unencrypted. Override with
+            # -c allow_public_http=true if you really want to.
+            allow_public_http = (
+                str(self.node.try_get_context("allow_public_http") or "").lower() == "true"
+            )
+            if not allow_public_http:
+                raise ValueError(
+                    "Refusing public_alb=true without acm_cert_arn — login traffic would "
+                    "be sent over HTTP. Set -c acm_cert_arn=<ACM ARN> to enable HTTPS, "
+                    "or -c allow_public_http=true to explicitly accept the risk."
+                )
         environment = self.node.try_get_context("environment") or "prod"
         extra_tags_raw = self.node.try_get_context("tags") or "{}"
         try:
@@ -394,7 +414,7 @@ class AmsDashboardStack(cdk.Stack):
             cpu=256,
             memory_limit_mib=512,
             desired_count=1,
-            public_load_balancer=False,  # internal ALB
+            public_load_balancer=public_alb,
             task_subnets=task_subnets,
             assign_public_ip=task_assign_public_ip,
             certificate=certificate,
