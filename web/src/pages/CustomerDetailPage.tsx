@@ -20,11 +20,9 @@ import type {
   Organization,
   OrgUser,
   PatchHistoryEntry,
-  ZabbixStatus,
 } from '../types'
 
 const AMS_LEVELS: AmsLevel[] = ['Essential', 'Enhanced', 'Expert']
-const ZABBIX_STATUSES: ZabbixStatus[] = ['Good', 'Issue']
 const COUNTRIES: Country[] = ['US', 'CA']
 
 export function CustomerDetailPage() {
@@ -140,6 +138,7 @@ function DetailsSection({
     local_name: org.local_name,
     ams_level: org.ams_level,
     zabbix_status: org.zabbix_status,
+    not_using_zabbix: org.not_using_zabbix,
     country: org.country,
     help_desk_phone: org.help_desk_phone,
     roadmap: org.roadmap,
@@ -189,19 +188,17 @@ function DetailsSection({
             ))}
           </select>
         </Field>
-        <Field label="Zabbix Status">
-          <select
-            className="input"
-            value={draft.zabbix_status ?? ''}
-            onChange={(e) => set('zabbix_status', (e.target.value as ZabbixStatus) || null)}
+        <Field label="Zabbix">
+          <label
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 0' }}
           >
-            <option value="">— Not set —</option>
-            {ZABBIX_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+            <input
+              type="checkbox"
+              checked={!!draft.not_using_zabbix}
+              onChange={(e) => set('not_using_zabbix', e.target.checked)}
+            />
+            Not Using Zabbix
+          </label>
         </Field>
         <Field label="Country">
           <select

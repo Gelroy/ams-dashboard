@@ -50,6 +50,12 @@ class Organization(SoftDeleteModel):
     zabbix_status = models.CharField(
         max_length=8, choices=ZabbixStatus.choices, null=True, blank=True
     )
+    # Customer opted out of Zabbix monitoring entirely. When true, the
+    # Customers-list rollup shows "N/A" instead of a colored dot. Replaces
+    # the old per-org Good/Issue dropdown in the UI (the zabbix_status
+    # field above is kept for now to preserve existing data, but no
+    # longer surfaced in the customer detail form).
+    not_using_zabbix = models.BooleanField(default=False)
     country = models.CharField(
         max_length=2, choices=Country.choices, null=True, blank=True
     )

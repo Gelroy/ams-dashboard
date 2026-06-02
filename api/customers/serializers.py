@@ -29,6 +29,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "display_name",
             "ams_level",
             "zabbix_status",
+            "not_using_zabbix",
             "country",
             "help_desk_phone",
             "roadmap",
@@ -84,10 +85,16 @@ class OrganizationSerializer(serializers.ModelSerializer):
         return organization_patching_rollup(obj)
 
     def get_zabbix_status_rollup(self, obj):
-        """Placeholder rollup. Until the live Zabbix integration is wired
-        up, every org reports 'green' so the customers-list column stays
-        consistent with the cert/patching dots. Replace this with a real
-        computation when the upstream data source lands."""
+        """Placeholder rollup with a customer-opt-out short-circuit.
+
+        - If the customer is flagged not_using_zabbix, return "na" — the
+          customers list renders that as an "N/A" label instead of a dot.
+        - Otherwise return "green" for now, pending the live Zabbix
+          integration. Swap this branch in when the upstream data source
+          lands; the "na" short-circuit should stay.
+        """
+        if obj.not_using_zabbix:
+            return "na"
         return "green"
 
     def get_cert_status(self, obj):

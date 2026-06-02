@@ -149,8 +149,15 @@ function PatchDot({ status }: { status: 'green' | 'yellow' | 'red' | 'unknown' }
   return <span className={`cert-dot cert-${status}`} title={title} aria-label={title}>●</span>
 }
 
-function ZabbixDot({ status }: { status: 'green' | 'yellow' | 'red' | 'unknown' }) {
+function ZabbixDot({ status }: { status: 'green' | 'yellow' | 'red' | 'unknown' | 'na' }) {
   if (status === 'unknown') return <span className="meta">—</span>
+  if (status === 'na') {
+    return (
+      <span className="meta" title="Customer is not using Zabbix" aria-label="Not using Zabbix">
+        N/A
+      </span>
+    )
+  }
   // Until the live Zabbix integration is wired up, every org reports
   // green. Tooltip wording mirrors cert/patch dots.
   const title =

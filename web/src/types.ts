@@ -25,6 +25,7 @@ export interface Organization {
   display_name: string
   ams_level: AmsLevel | null
   zabbix_status: ZabbixStatus | null
+  not_using_zabbix: boolean
   country: Country | null
   help_desk_phone: string | null
   roadmap: string | null
@@ -40,7 +41,7 @@ export interface Organization {
   needs_patching: NeedsPatchingStatus
   patching_status: 'green' | 'yellow' | 'red' | 'unknown'
   cert_status: 'green' | 'yellow' | 'red' | 'unknown'
-  zabbix_status_rollup: 'green' | 'yellow' | 'red' | 'unknown'
+  zabbix_status_rollup: 'green' | 'yellow' | 'red' | 'unknown' | 'na'
 }
 
 export interface OrgUser {
@@ -72,6 +73,7 @@ export type EditableOrgFields = Pick<
   | 'local_name'
   | 'ams_level'
   | 'zabbix_status'
+  | 'not_using_zabbix'
   | 'country'
   | 'help_desk_phone'
   | 'roadmap'
