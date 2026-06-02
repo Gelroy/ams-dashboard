@@ -139,6 +139,7 @@ function DetailsSection({
     ams_level: org.ams_level,
     zabbix_status: org.zabbix_status,
     help_desk_phone: org.help_desk_phone,
+    roadmap: org.roadmap,
     notes: org.notes,
   })
   const [saving, setSaving] = useState(false)
@@ -234,14 +235,16 @@ function DetailsSection({
             </div>
           )}
         </Field>
-        <Field label="Notes" wide>
-          <textarea
-            className="input textarea"
-            rows={3}
-            value={draft.notes ?? ''}
-            onChange={(e) => set('notes', e.target.value || null)}
-          />
-        </Field>
+        <ExpandableField
+          label="Roadmap"
+          value={draft.roadmap ?? null}
+          onChange={(v) => set('roadmap', v)}
+        />
+        <ExpandableField
+          label="Notes"
+          value={draft.notes ?? null}
+          onChange={(v) => set('notes', v)}
+        />
         <Field label="Open Tickets">
           <span className="meta">
             {org.open_ticket_count ?? '—'}
@@ -730,5 +733,38 @@ function Field({
       <div className="field-label">{label}</div>
       <div className="field-control">{children}</div>
     </div>
+  )
+}
+
+/** Collapsible long-form text field. Wide by default (spans the form grid),
+ *  collapsed when first rendered. Summary shows the label + a short status
+ *  hint so users can tell at a glance whether content exists. */
+function ExpandableField({
+  label,
+  value,
+  onChange,
+  rows = 6,
+}: {
+  label: string
+  value: string | null
+  onChange: (next: string | null) => void
+  rows?: number
+}) {
+  const trimmed = (value ?? '').trim()
+  const hint = trimmed ? `${trimmed.length} chars` : 'empty'
+  return (
+    <details className="field field-wide expandable-field">
+      <summary className="field-label expandable-summary">
+        {label}
+        <span className="meta" style={{ marginLeft: 8 }}>· {hint}</span>
+      </summary>
+      <textarea
+        className="input textarea"
+        rows={rows}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value || null)}
+        style={{ marginTop: 6, width: '100%' }}
+      />
+    </details>
   )
 }

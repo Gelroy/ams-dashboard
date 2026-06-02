@@ -46,6 +46,10 @@ class Organization(SoftDeleteModel):
         max_length=8, choices=ZabbixStatus.choices, null=True, blank=True
     )
     help_desk_phone = models.TextField(null=True, blank=True)
+    # Long-form strategic-planning notes — separate from the operational
+    # `notes` field so the team can keep day-to-day observations distinct
+    # from forward-looking plans.
+    roadmap = models.TextField(null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
     open_ticket_count = models.IntegerField(null=True, blank=True)
     ticket_count_synced_at = models.DateTimeField(null=True, blank=True)

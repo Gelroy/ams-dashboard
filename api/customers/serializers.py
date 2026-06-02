@@ -27,6 +27,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "ams_level",
             "zabbix_status",
             "help_desk_phone",
+            "roadmap",
             "notes",
             "open_ticket_count",
             "ticket_count_synced_at",
