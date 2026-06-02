@@ -101,6 +101,7 @@ export interface Server {
   environment: string
   environment_name: string
   name: string
+  ip_address: string | null
   notes: string | null
   cert_expires_on: string | null
   baskets: ServerBasketRef[]
@@ -108,7 +109,7 @@ export interface Server {
   needs_patching: NeedsPatchingStatus
 }
 
-export type EditableServerFields = Pick<Server, 'name' | 'notes' | 'cert_expires_on'>
+export type EditableServerFields = Pick<Server, 'name' | 'ip_address' | 'notes' | 'cert_expires_on'>
 
 export type LifecycleStatus = 'Latest' | 'Supported' | 'EOL'
 // Back-compat alias used by existing imports.

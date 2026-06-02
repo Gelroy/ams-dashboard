@@ -213,6 +213,9 @@ class Server(SoftDeleteModel):
         Environment, on_delete=models.CASCADE, related_name="servers"
     )
     name = models.TextField()
+    # IPv4 address (validated by GenericIPAddressField). Optional — not every
+    # server will have one recorded.
+    ip_address = models.GenericIPAddressField(protocol="IPv4", null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
     cert_expires_on = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

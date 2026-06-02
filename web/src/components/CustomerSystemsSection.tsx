@@ -237,6 +237,9 @@ function ServerTable({
           <tr>
             <th style={{ width: 24 }}></th>
             <th>Server</th>
+            {/* IP address — header intentionally empty; the masked input
+                ###.###.###.### is self-evident. */}
+            <th style={{ width: 150 }}></th>
             <th style={{ width: 90 }}>Env</th>
             <th>Baskets</th>
             <th style={{ width: 140 }}>Cert Expires</th>
@@ -287,6 +290,7 @@ function ServerRow({
   onChanged: () => void
 }) {
   const [name, setName] = useState(server.name)
+  const [ip, setIp] = useState(server.ip_address ?? '')
 
   return (
     <>
@@ -304,6 +308,31 @@ function ServerRow({
             onBlur={() => {
               if (name !== server.name) onPatch(server.id, { name })
             }}
+          />
+        </td>
+        <td>
+          <input
+            className="input compact"
+            value={ip}
+            placeholder="___.___.___.___"
+            inputMode="numeric"
+            // 15 = max valid IPv4 length (e.g. "255.255.255.255")
+            maxLength={15}
+            onChange={(e) => setIp(maskIpv4(e.target.value))}
+            onBlur={() => {
+              const next = ip.trim() || null
+              const current = server.ip_address ?? null
+              if (next === current) return
+              // Don't PATCH a half-typed value that the backend would
+              // reject — clear input or valid IPv4 only.
+              if (next !== null && !isValidIpv4(next)) {
+                // Roll the input back so the user sees they need to finish.
+                setIp(server.ip_address ?? '')
+                return
+              }
+              onPatch(server.id, { ip_address: next })
+            }}
+            title="IPv4 address — leave blank if not recorded"
           />
         </td>
         <td>
@@ -333,7 +362,7 @@ function ServerRow({
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={7} className="server-detail-cell">
+          <td colSpan={8} className="server-detail-cell">
             <ServerDetailPanel
               server={server}
               baskets={baskets}
@@ -785,4 +814,28 @@ function PatchingBadge({ status }: { status: NeedsPatchingStatus }) {
   if (status === 'yes') return <span className="badge patch-yes">Needs Patching</span>
   if (status === 'no') return <span className="badge patch-no">Up to Date</span>
   return <span className="meta">—</span>
+}
+
+/** Mask raw user input into IPv4 shape ###.###.###.### — per-segment we
+ *  keep only digits, cap at 3 chars each, and keep at most 4 segments. We
+ *  don't auto-insert dots; the user types them (or pastes a real IP), and
+ *  the function just sanitises whatever they typed. */
+function maskIpv4(raw: string): string {
+  return raw
+    .split('.')
+    .slice(0, 4)
+    .map((s) => s.replace(/\D/g, '').slice(0, 3))
+    .join('.')
+}
+
+/** Strict-ish IPv4 validator — four octets, each 0–255. Used on blur to
+ *  decide whether to PATCH or roll the input back. Empty string is handled
+ *  by the caller (treated as "clear the field"). */
+function isValidIpv4(s: string): boolean {
+  const m = s.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (!m) return false
+  return m.slice(1).every((part) => {
+    const n = parseInt(part, 10)
+    return n >= 0 && n <= 255
+  })
 }

@@ -166,6 +166,7 @@ class ServerSerializer(serializers.ModelSerializer):
             "environment",
             "environment_name",
             "name",
+            "ip_address",
             "notes",
             "cert_expires_on",
             "baskets",
