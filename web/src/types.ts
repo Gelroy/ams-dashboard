@@ -40,6 +40,7 @@ export interface Organization {
   needs_patching: NeedsPatchingStatus
   patching_status: 'green' | 'yellow' | 'red' | 'unknown'
   cert_status: 'green' | 'yellow' | 'red' | 'unknown'
+  zabbix_status_rollup: 'green' | 'yellow' | 'red' | 'unknown'
 }
 
 export interface OrgUser {

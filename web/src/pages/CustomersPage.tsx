@@ -73,9 +73,9 @@ export function CustomersPage() {
             <tr>
               <th>Name</th>
               <th>AMS Level</th>
-              <th>Zabbix</th>
               <th>Automated</th>
               <th>Manual</th>
+              <th>Zabbix</th>
               <th>Patching</th>
               <th>Cert</th>
               <th>Country</th>
@@ -108,11 +108,9 @@ export function CustomersPage() {
                     )}
                   </td>
                   <td>{o.ams_level ? <Badge value={o.ams_level} /> : <span className="meta">—</span>}</td>
-                  <td>
-                    {o.zabbix_status ? <Badge value={o.zabbix_status} /> : <span className="meta">—</span>}
-                  </td>
                   <td>{o.automated_ticket_count ?? <span className="meta">—</span>}</td>
                   <td>{o.manual_ticket_count ?? <span className="meta">—</span>}</td>
+                  <td><ZabbixDot status={o.zabbix_status_rollup} /></td>
                   <td><PatchDot status={o.patching_status} /></td>
                   <td><CertDot status={o.cert_status} /></td>
                   <td>{o.country ?? <span className="meta">—</span>}</td>
@@ -148,5 +146,18 @@ function PatchDot({ status }: { status: 'green' | 'yellow' | 'red' | 'unknown' }
       : status === 'yellow'
         ? 'Some servers need patching, others are up to date'
         : 'No server needs patching'
+  return <span className={`cert-dot cert-${status}`} title={title} aria-label={title}>●</span>
+}
+
+function ZabbixDot({ status }: { status: 'green' | 'yellow' | 'red' | 'unknown' }) {
+  if (status === 'unknown') return <span className="meta">—</span>
+  // Until the live Zabbix integration is wired up, every org reports
+  // green. Tooltip wording mirrors cert/patch dots.
+  const title =
+    status === 'red'
+      ? 'Zabbix is reporting one or more critical issues'
+      : status === 'yellow'
+        ? 'Zabbix has warnings'
+        : 'All Zabbix metrics healthy'
   return <span className={`cert-dot cert-${status}`} title={title} aria-label={title}>●</span>
 }

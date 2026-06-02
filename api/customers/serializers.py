@@ -17,6 +17,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
     needs_patching = serializers.SerializerMethodField()
     patching_status = serializers.SerializerMethodField()
     cert_status = serializers.SerializerMethodField()
+    zabbix_status_rollup = serializers.SerializerMethodField()
 
     class Meta:
         model = Organization
@@ -43,6 +44,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "needs_patching",
             "patching_status",
             "cert_status",
+            "zabbix_status_rollup",
         ]
         read_only_fields = [
             "id",
@@ -60,6 +62,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "needs_patching",
             "patching_status",
             "cert_status",
+            "zabbix_status_rollup",
         ]
 
     def get_sme_staff(self, obj):
@@ -79,6 +82,13 @@ class OrganizationSerializer(serializers.ModelSerializer):
         from baskets.services import organization_patching_rollup
 
         return organization_patching_rollup(obj)
+
+    def get_zabbix_status_rollup(self, obj):
+        """Placeholder rollup. Until the live Zabbix integration is wired
+        up, every org reports 'green' so the customers-list column stays
+        consistent with the cert/patching dots. Replace this with a real
+        computation when the upstream data source lands."""
+        return "green"
 
     def get_cert_status(self, obj):
         """Roll-up of server cert_expires_on across the org.
