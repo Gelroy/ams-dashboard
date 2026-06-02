@@ -30,6 +30,8 @@ export interface Organization {
   roadmap: string | null
   notes: string | null
   open_ticket_count: number | null
+  automated_ticket_count: number | null
+  manual_ticket_count: number | null
   ticket_count_synced_at: string | null
   last_ticket_sync_error: string | null
   jira_synced_at: string | null

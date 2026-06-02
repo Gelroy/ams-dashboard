@@ -60,6 +60,14 @@ class Organization(SoftDeleteModel):
     roadmap = models.TextField(null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
     open_ticket_count = models.IntegerField(null=True, blank=True)
+    # Split of open_ticket_count: tickets assigned to an "*Alert*" user
+    # (automated/monitoring origin) vs everything else (manual / human-
+    # initiated). Either may be null if a sync error happened before the
+    # split was computed; in that case open_ticket_count may still be the
+    # last-known total. Sum invariant: automated + manual == open_ticket_count
+    # when both are non-null.
+    automated_ticket_count = models.IntegerField(null=True, blank=True)
+    manual_ticket_count = models.IntegerField(null=True, blank=True)
     ticket_count_synced_at = models.DateTimeField(null=True, blank=True)
     last_ticket_sync_error = models.TextField(null=True, blank=True)
     jira_synced_at = models.DateTimeField(null=True, blank=True)

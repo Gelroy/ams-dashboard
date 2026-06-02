@@ -74,7 +74,8 @@ export function CustomersPage() {
               <th>Name</th>
               <th>AMS Level</th>
               <th>Zabbix</th>
-              <th>Open Tickets</th>
+              <th>Automated</th>
+              <th>Manual</th>
               <th>Patching</th>
               <th>Cert</th>
               <th>Country</th>
@@ -83,14 +84,14 @@ export function CustomersPage() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={7} className="state-cell">
+                <td colSpan={8} className="state-cell">
                   Loading…
                 </td>
               </tr>
             )}
             {!loading && items.length === 0 && (
               <tr>
-                <td colSpan={7} className="state-cell">
+                <td colSpan={8} className="state-cell">
                   No customers found.
                 </td>
               </tr>
@@ -110,7 +111,8 @@ export function CustomersPage() {
                   <td>
                     {o.zabbix_status ? <Badge value={o.zabbix_status} /> : <span className="meta">—</span>}
                   </td>
-                  <td>{o.open_ticket_count ?? <span className="meta">—</span>}</td>
+                  <td>{o.automated_ticket_count ?? <span className="meta">—</span>}</td>
+                  <td>{o.manual_ticket_count ?? <span className="meta">—</span>}</td>
                   <td><PatchingBadge status={o.needs_patching} /></td>
                   <td><CertDot status={o.cert_status} /></td>
                   <td>{o.country ?? <span className="meta">—</span>}</td>

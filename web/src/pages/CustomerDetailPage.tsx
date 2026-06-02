@@ -265,6 +265,12 @@ function DetailsSection({
         <Field label="Open Tickets">
           <span className="meta">
             {org.open_ticket_count ?? '—'}
+            {(org.automated_ticket_count != null || org.manual_ticket_count != null) && (
+              <>
+                {' · '}Automated {org.automated_ticket_count ?? '—'} / Manual{' '}
+                {org.manual_ticket_count ?? '—'}
+              </>
+            )}
             {org.ticket_count_synced_at && (
               <> · synced {new Date(org.ticket_count_synced_at).toLocaleString()}</>
             )}

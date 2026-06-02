@@ -6,7 +6,7 @@ from customers.models import Organization
 
 
 class Command(BaseCommand):
-    help = "Update open JIRA ticket counts on each organization"
+    help = "Update open JIRA ticket counts on each organization, split into Automated (assigned to an 'Alert' user) and Manual"
 
     def handle(self, *args, **opts):
         rows = list(Organization.objects.values_list("id", "jira_org_id"))
@@ -17,12 +17,30 @@ class Command(BaseCommand):
         ok = 0
         errors = 0
         with JiraClient() as jira:
+            # Resolve the set of "*Alert*" account IDs once per run. If this
+            # lookup fails we abort the whole sync — the splits would be
+            # meaningless without it.
+            try:
+                alert_ids = jira.fetch_alert_account_ids()
+            except Exception as e:
+                self.stderr.write(
+                    self.style.ERROR(f"Failed to fetch Alert user IDs: {e}")
+                )
+                return
+            self.stdout.write(
+                f"Resolved {len(alert_ids)} Alert-flavored accountIds for the split"
+            )
+
             for org_id, jira_org_id in rows:
                 now = timezone.now()
                 try:
-                    count = jira.fetch_open_ticket_count(jira_org_id)
+                    automated, manual = jira.fetch_split_ticket_counts(
+                        jira_org_id, alert_ids
+                    )
                     Organization.objects.filter(id=org_id).update(
-                        open_ticket_count=count,
+                        open_ticket_count=automated + manual,
+                        automated_ticket_count=automated,
+                        manual_ticket_count=manual,
                         ticket_count_synced_at=now,
                         last_ticket_sync_error=None,
                     )
