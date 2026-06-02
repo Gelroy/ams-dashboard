@@ -113,7 +113,7 @@ export function CustomersPage() {
                   </td>
                   <td>{o.automated_ticket_count ?? <span className="meta">—</span>}</td>
                   <td>{o.manual_ticket_count ?? <span className="meta">—</span>}</td>
-                  <td><PatchingBadge status={o.needs_patching} /></td>
+                  <td><PatchDot status={o.patching_status} /></td>
                   <td><CertDot status={o.cert_status} /></td>
                   <td>{o.country ?? <span className="meta">—</span>}</td>
                 </tr>
@@ -129,12 +129,6 @@ function Badge({ value }: { value: string }) {
   return <span className={`badge badge-${value.toLowerCase()}`}>{value}</span>
 }
 
-function PatchingBadge({ status }: { status: 'yes' | 'no' | 'unknown' }) {
-  if (status === 'yes') return <span className="badge patch-yes">Needs Patching</span>
-  if (status === 'no') return <span className="badge patch-no">Up to Date</span>
-  return <span className="meta">—</span>
-}
-
 function CertDot({ status }: { status: 'green' | 'yellow' | 'red' | 'unknown' }) {
   if (status === 'unknown') return <span className="meta">—</span>
   const title =
@@ -143,5 +137,16 @@ function CertDot({ status }: { status: 'green' | 'yellow' | 'red' | 'unknown' })
       : status === 'yellow'
         ? 'A server cert expires within 30 days'
         : 'All server certs are at least 30 days out'
+  return <span className={`cert-dot cert-${status}`} title={title} aria-label={title}>●</span>
+}
+
+function PatchDot({ status }: { status: 'green' | 'yellow' | 'red' | 'unknown' }) {
+  if (status === 'unknown') return <span className="meta">—</span>
+  const title =
+    status === 'red'
+      ? 'Every server needs patching'
+      : status === 'yellow'
+        ? 'Some servers need patching, others are up to date'
+        : 'No server needs patching'
   return <span className={`cert-dot cert-${status}`} title={title} aria-label={title}>●</span>
 }

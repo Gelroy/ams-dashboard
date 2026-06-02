@@ -15,6 +15,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
     documents = OrgDocumentSerializer(many=True, read_only=True)
     sme_staff = serializers.SerializerMethodField()
     needs_patching = serializers.SerializerMethodField()
+    patching_status = serializers.SerializerMethodField()
     cert_status = serializers.SerializerMethodField()
 
     class Meta:
@@ -40,6 +41,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "documents",
             "sme_staff",
             "needs_patching",
+            "patching_status",
             "cert_status",
         ]
         read_only_fields = [
@@ -56,6 +58,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "last_ticket_sync_error",
             "jira_synced_at",
             "needs_patching",
+            "patching_status",
             "cert_status",
         ]
 
@@ -71,6 +74,11 @@ class OrganizationSerializer(serializers.ModelSerializer):
         from baskets.services import organization_needs_patching
 
         return organization_needs_patching(obj)
+
+    def get_patching_status(self, obj):
+        from baskets.services import organization_patching_rollup
+
+        return organization_patching_rollup(obj)
 
     def get_cert_status(self, obj):
         """Roll-up of server cert_expires_on across the org.

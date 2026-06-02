@@ -86,3 +86,34 @@ def organization_needs_patching(org) -> str:
             if status == "no":
                 saw_no = True
     return "no" if saw_no else "unknown"
+
+
+def organization_patching_rollup(org) -> str:
+    """Color-coded rollup of server-level needs-patching across the org.
+
+      - "red"     : every known server needs patching
+      - "yellow"  : some servers need patching, others don't (mixed)
+      - "green"   : no known server needs patching
+      - "unknown" : no servers, or every server is 'unknown' (no baskets
+                    yet, or no Latest release declared on the basket's
+                    pinned version).
+
+    Unknown-status servers do not push the rollup toward red or green —
+    only servers we can actually evaluate count.
+    """
+    yes_count = 0
+    no_count = 0
+    for env in org.environments.filter(deleted_at__isnull=True).prefetch_related("servers"):
+        for srv in env.servers.filter(deleted_at__isnull=True):
+            status = server_needs_patching(srv)
+            if status == "yes":
+                yes_count += 1
+            elif status == "no":
+                no_count += 1
+    if yes_count == 0 and no_count == 0:
+        return "unknown"
+    if no_count == 0:
+        return "red"  # every evaluable server needs patching
+    if yes_count == 0:
+        return "green"  # no evaluable server needs patching
+    return "yellow"  # mixed

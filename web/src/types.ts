@@ -38,6 +38,7 @@ export interface Organization {
   documents: OrgDocument[]
   sme_staff: SmeStaffRef[]
   needs_patching: NeedsPatchingStatus
+  patching_status: 'green' | 'yellow' | 'red' | 'unknown'
   cert_status: 'green' | 'yellow' | 'red' | 'unknown'
 }
 
