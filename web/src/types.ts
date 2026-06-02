@@ -47,6 +47,7 @@ export interface OrgUser {
   role: string | null
   alerts_enabled: boolean
   is_primary: boolean
+  ams_report: boolean
   is_hidden: boolean
 }
 
@@ -70,7 +71,7 @@ export type EditableOrgFields = Pick<
 
 export type EditableUserFields = Pick<
   OrgUser,
-  'role' | 'alerts_enabled' | 'is_primary' | 'is_hidden'
+  'role' | 'alerts_enabled' | 'is_primary' | 'ams_report' | 'is_hidden'
 >
 
 export interface Environment {

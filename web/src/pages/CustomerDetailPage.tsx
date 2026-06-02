@@ -481,6 +481,40 @@ function formatPhone(raw: string): string {
   return raw
 }
 
+/** Copy `text` to the system clipboard. Prefers the async Clipboard API
+ *  (only available in secure contexts — i.e., HTTPS or localhost), and
+ *  falls back to the older execCommand path with a hidden textarea so the
+ *  header-click email copy works during the HTTP-only window before our
+ *  cert lands. Returns true if the copy succeeded. */
+async function copyToClipboard(text: string): Promise<boolean> {
+  // Prefer the async API when allowed.
+  if (typeof navigator !== 'undefined' && navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // fall through to legacy path
+    }
+  }
+  // Legacy fallback — works on http:// pages where the async API is gated.
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.top = '-1000px'
+    ta.style.opacity = '0'
+    ta.setAttribute('readonly', '')
+    document.body.appendChild(ta)
+    ta.select()
+    ta.setSelectionRange(0, text.length)
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
+}
+
 function UsersSection({
   orgId,
   users,
@@ -497,6 +531,8 @@ function UsersSection({
   // in case they become relevant again) but disappear from the table until
   // this is toggled on.
   const [showHidden, setShowHidden] = useState(false)
+  // Transient feedback after a header-click copy. Cleared by a timer.
+  const [copyMsg, setCopyMsg] = useState<string | null>(null)
 
   const visibleUsers = showHidden ? users : users.filter((u) => !u.is_hidden)
   const hiddenCount = users.filter((u) => u.is_hidden).length
@@ -512,6 +548,35 @@ function UsersSection({
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setSavingId(null))
+  }
+
+  const copyEmailsForFlag = (
+    flag: 'alerts_enabled' | 'is_primary' | 'ams_report',
+    label: string,
+  ) => {
+    const emails = users
+      .filter((u) => u[flag] && u.email)
+      .map((u) => (u.email as string).trim())
+      .filter(Boolean)
+    if (emails.length === 0) {
+      flashCopyMsg(`No users have ${label} checked.`)
+      return
+    }
+    const text = emails.join('; ')
+    copyToClipboard(text)
+      .then((ok) => {
+        flashCopyMsg(
+          ok
+            ? `Copied ${emails.length} ${label} email${emails.length === 1 ? '' : 's'}`
+            : 'Copy failed — your browser blocked clipboard access.',
+        )
+      })
+      .catch(() => flashCopyMsg('Copy failed — your browser blocked clipboard access.'))
+  }
+
+  const flashCopyMsg = (msg: string) => {
+    setCopyMsg(msg)
+    window.setTimeout(() => setCopyMsg(null), 2500)
   }
 
   return (
@@ -530,6 +595,7 @@ function UsersSection({
             <span className="meta"> ({hiddenCount} hidden)</span>
           )}
         </label>
+        {copyMsg && <span className="meta">· {copyMsg}</span>}
       </div>
 
       {users.length === 0 ? (
@@ -549,8 +615,27 @@ function UsersSection({
                 <th>Name</th>
                 <th>Email</th>
                 <th>Role</th>
-                <th style={{ width: 80 }}>Alerts</th>
-                <th style={{ width: 80 }}>Primary</th>
+                <th
+                  style={{ width: 80, cursor: 'pointer' }}
+                  onClick={() => copyEmailsForFlag('alerts_enabled', 'Alerts')}
+                  title="Click to copy emails of users with Alerts checked"
+                >
+                  Alerts <span className="meta">⧉</span>
+                </th>
+                <th
+                  style={{ width: 80, cursor: 'pointer' }}
+                  onClick={() => copyEmailsForFlag('is_primary', 'Primary')}
+                  title="Click to copy emails of users with Primary checked"
+                >
+                  Primary <span className="meta">⧉</span>
+                </th>
+                <th
+                  style={{ width: 100, cursor: 'pointer' }}
+                  onClick={() => copyEmailsForFlag('ams_report', 'AMS Report')}
+                  title="Click to copy emails of users with AMS Report checked"
+                >
+                  AMS Report <span className="meta">⧉</span>
+                </th>
                 <th style={{ width: 60 }}>Hide</th>
               </tr>
             </thead>
@@ -587,6 +672,13 @@ function UsersSection({
                       type="checkbox"
                       checked={u.is_primary}
                       onChange={(e) => patchUser(u.id, { is_primary: e.target.checked })}
+                    />
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={u.ams_report}
+                      onChange={(e) => patchUser(u.id, { ams_report: e.target.checked })}
                     />
                   </td>
                   <td style={{ textAlign: 'center' }}>

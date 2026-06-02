@@ -132,6 +132,9 @@ class OrgUser(SoftDeleteModel):
     role = models.TextField(null=True, blank=True)
     alerts_enabled = models.BooleanField(default=False)
     is_primary = models.BooleanField(default=False)
+    # Whether this user should receive the periodic AMS report email.
+    # Local-only flag; never written by sync_jira_users.
+    ams_report = models.BooleanField(default=False)
     # Local-only display flag — lets the team hide JIRA-synced users they
     # don't actively work with from the Customer Detail Users table, while
     # keeping the row intact so it stays in sync if the user becomes
