@@ -8,7 +8,7 @@ declared yet).
 """
 from django.db import transaction
 
-from .models import Basket, ServerInstalledSoftware
+from .models import Basket, ServerBasket, ServerInstalledSoftware
 
 
 @transaction.atomic
@@ -33,6 +33,71 @@ def copy_installed_software(source_server_id, dest_server_id) -> int:
         )
         count += 1
     return count
+
+
+@transaction.atomic
+def copy_server_details_to_env_peers(source_server) -> int:
+    """Replace each env-peer's baskets, installed software, and notes with the
+    source server's. Identity fields (name, ip_address, cert_expires_on) are
+    intentionally left untouched — they are intrinsic to each peer.
+
+    Returns the number of peer servers updated.
+
+    Implementation notes:
+      - bulk_create() bypasses ServerBasket's post_save signal, which would
+        otherwise auto-create ServerInstalledSoftware rows at the basket's
+        pinned-Latest release. We want the source server's *exact* installed
+        entries (which may pin a non-Latest release), so we wipe and re-bulk-
+        create the installed_software table for each peer immediately after.
+      - Both deletes are hard deletes — these are M2M-style join rows, not
+        soft-deletable user data.
+    """
+    from customers.models import Server
+
+    env_id = source_server.environment_id
+    peers = list(
+        Server.objects.filter(environment_id=env_id, deleted_at__isnull=True)
+        .exclude(id=source_server.id)
+    )
+    if not peers:
+        return 0
+
+    source_basket_ids = list(
+        ServerBasket.objects.filter(server=source_server).values_list(
+            "basket_id", flat=True
+        )
+    )
+    source_installed = list(
+        ServerInstalledSoftware.objects.filter(server=source_server).values(
+            "software_id", "software_version_id", "software_release_id"
+        )
+    )
+
+    for dest in peers:
+        dest.notes = source_server.notes
+        dest.save(update_fields=["notes"])
+
+        ServerBasket.objects.filter(server=dest).delete()
+        if source_basket_ids:
+            ServerBasket.objects.bulk_create(
+                [ServerBasket(server=dest, basket_id=bid) for bid in source_basket_ids]
+            )
+
+        ServerInstalledSoftware.objects.filter(server=dest).delete()
+        if source_installed:
+            ServerInstalledSoftware.objects.bulk_create(
+                [
+                    ServerInstalledSoftware(
+                        server=dest,
+                        software_id=e["software_id"],
+                        software_version_id=e["software_version_id"],
+                        software_release_id=e["software_release_id"],
+                    )
+                    for e in source_installed
+                ]
+            )
+
+    return len(peers)
 
 
 def server_needs_patching(server) -> str:

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import {
   addInstalledSoftware,
   copyInstalledSoftwareFrom,
+  copyServerToEnvPeers,
   createEnvironment,
   createServer,
   deleteEnvironment,
@@ -397,6 +398,7 @@ function ServerDetailPanel({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [copyBusy, setCopyBusy] = useState(false)
   const assignedIds = new Set(server.baskets.map((b) => b.id))
 
   const toggleBasket = async (basketId: string) => {
@@ -415,8 +417,44 @@ function ServerDetailPanel({
     }
   }
 
+  const copyToEnv = async () => {
+    if (
+      !window.confirm(
+        'Do you want to copy all the details from this server to every other server in this environment?',
+      )
+    ) {
+      return
+    }
+    setCopyBusy(true)
+    setError(null)
+    try {
+      const { updated } = await copyServerToEnvPeers(orgId, server.id)
+      if (updated === 0) {
+        window.alert('No other servers in this environment to copy to.')
+      }
+      onChanged()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setCopyBusy(false)
+    }
+  }
+
   return (
     <div className="server-detail">
+      <div
+        className="panel-header-row"
+        style={{ marginBottom: 8, justifyContent: 'flex-end' }}
+      >
+        <button
+          className="btn"
+          disabled={copyBusy}
+          onClick={copyToEnv}
+          title="Replace every other server in this environment's notes, baskets, and installed software with this server's"
+        >
+          {copyBusy ? 'Copying…' : 'Copy to Environment'}
+        </button>
+      </div>
       <div className="sub-section">
         <div className="field-label">Assigned Baskets</div>
         <div className="env-chips">

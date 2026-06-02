@@ -237,6 +237,16 @@ export function deleteServer(orgId: string, serverId: string): Promise<void> {
   return request<void>(`/organizations/${orgId}/servers/${serverId}/`, { method: 'DELETE' })
 }
 
+export function copyServerToEnvPeers(
+  orgId: string,
+  serverId: string,
+): Promise<{ updated: number }> {
+  return request<{ updated: number }>(
+    `/organizations/${orgId}/servers/${serverId}/copy-to-env/`,
+    { method: 'POST' },
+  )
+}
+
 // Software catalog. /api/software/ returns the full nested tree.
 export function listSoftware(): Promise<Software[]> {
   return request<Software[]>(`/software/`)

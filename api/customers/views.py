@@ -3,6 +3,8 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django_filters import rest_framework as filters
 from rest_framework import mixins, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
 from .models import AmsLevel, Environment, Organization, OrgDocument, OrgUser, Server
 from .serializers import (
@@ -136,3 +138,17 @@ class ServerViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             **super().get_serializer_context(),
             "organization_pk": self.kwargs.get("organization_pk"),
         }
+
+    @action(detail=True, methods=["post"], url_path="copy-to-env")
+    def copy_to_env(self, request, organization_pk=None, pk=None):
+        """Replace every env-peer's notes, basket assignments, and installed
+        software with this server's. Returns {"updated": <peer count>}.
+
+        Server-identity fields (name, ip_address, cert_expires_on) are NOT
+        copied — those are intrinsic to each server.
+        """
+        from baskets.services import copy_server_details_to_env_peers
+
+        source = self.get_object()
+        count = copy_server_details_to_env_peers(source)
+        return Response({"updated": count})
