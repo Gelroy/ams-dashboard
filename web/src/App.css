@@ -769,3 +769,13 @@
 .expandable-field > .expandable-summary::-webkit-details-marker {
   display: none;
 }
+
+/* Customers list — server cert rollup indicator. */
+.cert-dot {
+  display: inline-block;
+  font-size: 18px;
+  line-height: 1;
+}
+.cert-green { color: #16a34a; }
+.cert-yellow { color: #eab308; }
+.cert-red { color: #dc2626; }

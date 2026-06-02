@@ -15,6 +15,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
     documents = OrgDocumentSerializer(many=True, read_only=True)
     sme_staff = serializers.SerializerMethodField()
     needs_patching = serializers.SerializerMethodField()
+    cert_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Organization
@@ -37,6 +38,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "documents",
             "sme_staff",
             "needs_patching",
+            "cert_status",
         ]
         read_only_fields = [
             "id",
@@ -50,6 +52,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "last_ticket_sync_error",
             "jira_synced_at",
             "needs_patching",
+            "cert_status",
         ]
 
     def get_sme_staff(self, obj):
@@ -64,6 +67,35 @@ class OrganizationSerializer(serializers.ModelSerializer):
         from baskets.services import organization_needs_patching
 
         return organization_needs_patching(obj)
+
+    def get_cert_status(self, obj):
+        """Roll-up of server cert_expires_on across the org.
+
+          - 'red'     : any cert is in the past (expired)
+          - 'yellow'  : any cert is within 30 days but none expired
+          - 'green'   : all set certs are 30+ days away
+          - 'unknown' : no servers or no certs set yet
+
+        Relies on prefetch_related('environments__servers') on the queryset
+        to avoid N+1 — both related managers are SoftDeleteManagers so
+        deleted rows are excluded automatically.
+        """
+        from datetime import date, timedelta
+
+        today = date.today()
+        soon = today + timedelta(days=30)
+        dates: list = []
+        for env in obj.environments.all():
+            for srv in env.servers.all():
+                if srv.cert_expires_on:
+                    dates.append(srv.cert_expires_on)
+        if not dates:
+            return "unknown"
+        if any(d < today for d in dates):
+            return "red"
+        if any(d < soon for d in dates):
+            return "yellow"
+        return "green"
 
 
 class OrgUserSerializer(serializers.ModelSerializer):

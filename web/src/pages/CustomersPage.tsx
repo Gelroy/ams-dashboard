@@ -76,20 +76,21 @@ export function CustomersPage() {
               <th>Zabbix</th>
               <th>Open Tickets</th>
               <th>Patching</th>
+              <th>Cert</th>
               <th>Country</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={6} className="state-cell">
+                <td colSpan={7} className="state-cell">
                   Loading…
                 </td>
               </tr>
             )}
             {!loading && items.length === 0 && (
               <tr>
-                <td colSpan={6} className="state-cell">
+                <td colSpan={7} className="state-cell">
                   No customers found.
                 </td>
               </tr>
@@ -111,6 +112,7 @@ export function CustomersPage() {
                   </td>
                   <td>{o.open_ticket_count ?? <span className="meta">—</span>}</td>
                   <td><PatchingBadge status={o.needs_patching} /></td>
+                  <td><CertDot status={o.cert_status} /></td>
                   <td>{o.country ?? <span className="meta">—</span>}</td>
                 </tr>
               ))}
@@ -129,4 +131,15 @@ function PatchingBadge({ status }: { status: 'yes' | 'no' | 'unknown' }) {
   if (status === 'yes') return <span className="badge patch-yes">Needs Patching</span>
   if (status === 'no') return <span className="badge patch-no">Up to Date</span>
   return <span className="meta">—</span>
+}
+
+function CertDot({ status }: { status: 'green' | 'yellow' | 'red' | 'unknown' }) {
+  if (status === 'unknown') return <span className="meta">—</span>
+  const title =
+    status === 'red'
+      ? 'One or more server certs are expired'
+      : status === 'yellow'
+        ? 'A server cert expires within 30 days'
+        : 'All server certs are at least 30 days out'
+  return <span className={`cert-dot cert-${status}`} title={title} aria-label={title}>●</span>
 }

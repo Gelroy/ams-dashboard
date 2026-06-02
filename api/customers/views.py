@@ -71,6 +71,9 @@ class OrganizationViewSet(
         return (
             Organization.objects.all()
             .annotate(_ams_priority=ams_priority)
+            # Prefetched so OrganizationSerializer.get_cert_status can walk
+            # env→server without hitting N+1.
+            .prefetch_related("environments__servers")
             .order_by("_ams_priority", Coalesce("local_name", "jira_name"))
         )
 
