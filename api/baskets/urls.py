@@ -28,6 +28,11 @@ server_nested_patterns = [
         name="server-installed-list",
     ),
     path(
+        "organizations/<uuid:organization_pk>/servers/<uuid:server_pk>/installed/copy-from/",
+        ServerInstalledSoftwareViewSet.as_view({"post": "copy_from"}),
+        name="server-installed-copy-from",
+    ),
+    path(
         # NB: ServerInstalledSoftware has no explicit PK — it falls back to
         # Django's DEFAULT_AUTO_FIELD = BigAutoField (an integer). Every other
         # model in the codebase uses a UUIDField PK so the rest of the API

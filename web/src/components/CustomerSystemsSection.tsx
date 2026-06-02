@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import {
   addInstalledSoftware,
+  copyInstalledSoftwareFrom,
   createEnvironment,
   createServer,
   deleteEnvironment,
@@ -97,9 +98,21 @@ export function CustomerSystemsSection({ orgId }: Props) {
       {envs.length > 0 && (
         <AddServerForm
           envs={envs}
-          onAdd={async (envId, name) => {
+          existingServers={servers}
+          onAdd={async (envId, name, copyFromServerId) => {
             const created = await createServer(orgId, { environment: envId, name })
-            setServers([...servers, created])
+            if (copyFromServerId) {
+              try {
+                await copyInstalledSoftwareFrom(orgId, created.id, copyFromServerId)
+              } catch (e) {
+                // Surface but don't block — the server is created; the user
+                // can populate installed software manually if the copy failed.
+                console.error('copy-from failed:', e)
+              }
+            }
+            // Refetch the full tree so the new server's installed_software
+            // (and the copy's effects) are reflected accurately.
+            refresh()
           }}
         />
       )}
@@ -662,23 +675,42 @@ function AddInstalledForm({
 
 function AddServerForm({
   envs,
+  existingServers,
   onAdd,
 }: {
   envs: Environment[]
-  onAdd: (envId: string, name: string) => Promise<void>
+  existingServers: Server[]
+  onAdd: (envId: string, name: string, copyFromServerId?: string) => Promise<void>
 }) {
   const [envId, setEnvId] = useState(envs[0]?.id ?? '')
   const [name, setName] = useState('')
+  const [includeExisting, setIncludeExisting] = useState(false)
+  const [sourceServerId, setSourceServerId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Build label "ENV / server" so the user can disambiguate two servers
+  // with the same name in different envs.
+  const envNameById = new Map(envs.map((e) => [e.id, e.name]))
+  const sortedSources = [...existingServers].sort((a, b) => {
+    const ea = envNameById.get(a.environment) ?? ''
+    const eb = envNameById.get(b.environment) ?? ''
+    return ea === eb ? a.name.localeCompare(b.name) : ea.localeCompare(eb)
+  })
+
   const submit = async () => {
     if (!envId || !name.trim()) return
+    if (includeExisting && !sourceServerId) {
+      setError('Pick a source server to copy from.')
+      return
+    }
     setBusy(true)
     setError(null)
     try {
-      await onAdd(envId, name.trim())
+      await onAdd(envId, name.trim(), includeExisting ? sourceServerId : undefined)
       setName('')
+      setIncludeExisting(false)
+      setSourceServerId('')
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -687,27 +719,58 @@ function AddServerForm({
   }
 
   return (
-    <div className="add-row">
-      <select className="input compact" value={envId} onChange={(e) => setEnvId(e.target.value)}>
-        {envs.map((e) => (
-          <option key={e.id} value={e.id}>
-            {e.name}
-          </option>
-        ))}
-      </select>
-      <input
-        className="input compact"
-        placeholder="New server name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') submit()
-        }}
-      />
-      <button className="btn" disabled={busy || !name.trim()} onClick={submit}>
-        + Add Server
-      </button>
-      {error && <span className="error-text">{error}</span>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div className="add-row">
+        <select className="input compact" value={envId} onChange={(e) => setEnvId(e.target.value)}>
+          {envs.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.name}
+            </option>
+          ))}
+        </select>
+        <input
+          className="input compact"
+          placeholder="New server name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+        />
+        <button className="btn" disabled={busy || !name.trim()} onClick={submit}>
+          + Add Server
+        </button>
+        {error && <span className="error-text">{error}</span>}
+      </div>
+      {existingServers.length > 0 && (
+        <div className="add-row">
+          <label className="filter-checkbox">
+            <input
+              type="checkbox"
+              checked={includeExisting}
+              onChange={(e) => {
+                setIncludeExisting(e.target.checked)
+                if (!e.target.checked) setSourceServerId('')
+              }}
+            />
+            Include existing software?
+          </label>
+          {includeExisting && (
+            <select
+              className="input compact"
+              value={sourceServerId}
+              onChange={(e) => setSourceServerId(e.target.value)}
+            >
+              <option value="">— copy from… —</option>
+              {sortedSources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {(envNameById.get(s.environment) ?? '?')} / {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
     </div>
   )
 }

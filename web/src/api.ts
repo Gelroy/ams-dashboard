@@ -434,6 +434,17 @@ export function removeInstalledSoftware(
   return request<void>(`/organizations/${orgId}/servers/${serverId}/installed/${id}/`, { method: 'DELETE' })
 }
 
+export function copyInstalledSoftwareFrom(
+  orgId: string,
+  destServerId: string,
+  sourceServerId: string,
+): Promise<ServerInstalledSoftwareEntry[]> {
+  return request<ServerInstalledSoftwareEntry[]>(
+    `/organizations/${orgId}/servers/${destServerId}/installed/copy-from/`,
+    { method: 'POST', body: JSON.stringify({ source_server_id: sourceServerId }) },
+  )
+}
+
 // Patch Groups
 export function listPatchGroups(): Promise<import('./types').PatchGroup[]> {
   return request(`/patch-groups/`)

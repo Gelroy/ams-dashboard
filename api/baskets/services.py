@@ -1,4 +1,4 @@
-"""Needs-Patching computation.
+"""Needs-Patching computation + ServerInstalledSoftware helpers.
 
 A server is "yes" (needs patching) if for any (basket, software) it is pinned to,
 its installed release for that software is not the Latest release in the basket's
@@ -6,7 +6,33 @@ pinned version. "no" if all installed software matches Latest. "unknown" when
 there is not enough data (no baskets, no installed entries, or no Latest release
 declared yet).
 """
+from django.db import transaction
+
 from .models import Basket, ServerInstalledSoftware
+
+
+@transaction.atomic
+def copy_installed_software(source_server_id, dest_server_id) -> int:
+    """Copy every ServerInstalledSoftware entry from source server to dest.
+
+    Per the model's unique_together(server, software), an existing entry on
+    dest for the same Software is updated in place (so dest ends up matching
+    source exactly even if a basket signal pre-populated some rows).
+
+    Returns the number of rows copied.
+    """
+    count = 0
+    for entry in ServerInstalledSoftware.objects.filter(server_id=source_server_id):
+        ServerInstalledSoftware.objects.update_or_create(
+            server_id=dest_server_id,
+            software_id=entry.software_id,
+            defaults={
+                "software_version": entry.software_version,
+                "software_release": entry.software_release,
+            },
+        )
+        count += 1
+    return count
 
 
 def server_needs_patching(server) -> str:
