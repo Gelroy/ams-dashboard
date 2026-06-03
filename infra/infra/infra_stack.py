@@ -321,6 +321,12 @@ class AmsDashboardStack(cdk.Stack):
             credentials=rds.Credentials.from_generated_secret("ams"),
             removal_policy=RemovalPolicy.SNAPSHOT,
             backup=rds.BackupProps(retention=Duration.days(7)),
+            # Belt-and-braces against accidental destruction. RemovalPolicy
+            # already takes a final snapshot on CFN delete, but deletion
+            # protection blocks the underlying `aws rds delete-db-cluster`
+            # call entirely — including `--skip-final-snapshot`, which
+            # would otherwise let an admin nuke the cluster with no record.
+            deletion_protection=True,
         )
 
         # ── Cognito ────────────────────────────────────────────────────
