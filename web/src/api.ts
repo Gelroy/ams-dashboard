@@ -450,7 +450,7 @@ export function createPatchGroup(name: string): Promise<import('./types').PatchG
 
 export function updatePatchGroup(
   id: string,
-  patch: { name?: string },
+  patch: { name?: string; software_ids?: string[] },
 ): Promise<import('./types').PatchGroup> {
   return request(`/patch-groups/${id}/`, {
     method: 'PATCH',
@@ -464,7 +464,13 @@ export function deletePatchGroup(id: string): Promise<void> {
 
 export function createPatchGroupStep(
   groupId: string,
-  payload: { step_num: number; description: string; est_time?: string | null; per_server?: boolean },
+  payload: {
+    step_num: number
+    description: string
+    est_time?: string | null
+    per_server?: boolean
+    not_timed?: boolean
+  },
 ): Promise<import('./types').PatchGroupStep> {
   return request(`/patch-groups/${groupId}/steps/`, {
     method: 'POST',
@@ -475,7 +481,12 @@ export function createPatchGroupStep(
 export function updatePatchGroupStep(
   groupId: string,
   stepId: string,
-  patch: Partial<Pick<import('./types').PatchGroupStep, 'description' | 'est_time' | 'per_server' | 'step_num'>>,
+  patch: Partial<
+    Pick<
+      import('./types').PatchGroupStep,
+      'description' | 'est_time' | 'per_server' | 'step_num' | 'not_timed'
+    >
+  >,
 ): Promise<import('./types').PatchGroupStep> {
   return request(`/patch-groups/${groupId}/steps/${stepId}/`, {
     method: 'PATCH',
@@ -501,7 +512,7 @@ export function createPatchPlan(name: string): Promise<import('./types').PatchPl
 
 export function updatePatchPlan(
   id: string,
-  patch: { name?: string; basket?: string | null },
+  patch: { name?: string; software_ids?: string[] },
 ): Promise<import('./types').PatchPlan> {
   return request(`/patch-plans/${id}/`, {
     method: 'PATCH',
@@ -513,18 +524,54 @@ export function deletePatchPlan(id: string): Promise<void> {
   return request<void>(`/patch-plans/${id}/`, { method: 'DELETE' })
 }
 
-export function addPatchPlanGroup(
+// One-shot import: copies the group's steps onto the end of the plan's
+// step list and unions the group's softwares into the plan's software list.
+// The group is forgotten by the plan after this call (no persistent link).
+export function importGroupIntoPlan(
   planId: string,
-  payload: { patch_group: string; position: number },
-): Promise<unknown> {
-  return request(`/patch-plans/${planId}/groups/`, {
+  groupId: string,
+): Promise<import('./types').PatchPlan> {
+  return request(`/patch-plans/${planId}/import-group/`, {
+    method: 'POST',
+    body: JSON.stringify({ patch_group: groupId }),
+  })
+}
+
+// Plan-owned step CRUD. Replaces the old "add/remove group" flow.
+export function createPatchPlanStep(
+  planId: string,
+  payload: {
+    step_num: number
+    description: string
+    est_time?: string | null
+    per_server?: boolean
+    not_timed?: boolean
+  },
+): Promise<import('./types').PatchPlanStep> {
+  return request(`/patch-plans/${planId}/steps/`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
 }
 
-export function removePatchPlanGroup(planId: string, groupId: string): Promise<void> {
-  return request<void>(`/patch-plans/${planId}/groups/${groupId}/`, { method: 'DELETE' })
+export function updatePatchPlanStep(
+  planId: string,
+  stepId: string,
+  patch: Partial<
+    Pick<
+      import('./types').PatchPlanStep,
+      'description' | 'est_time' | 'per_server' | 'step_num' | 'not_timed'
+    >
+  >,
+): Promise<import('./types').PatchPlanStep> {
+  return request(`/patch-plans/${planId}/steps/${stepId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deletePatchPlanStep(planId: string, stepId: string): Promise<void> {
+  return request<void>(`/patch-plans/${planId}/steps/${stepId}/`, { method: 'DELETE' })
 }
 
 // Patch Executions
@@ -538,7 +585,6 @@ export function listPatchExecutions(
 export function createPatchExecution(payload: {
   organization: string
   environment: string
-  basket: string
   patch_plan?: string | null
   planned_date?: string | null
 }): Promise<import('./types').PatchExecution> {
@@ -546,6 +592,15 @@ export function createPatchExecution(payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+// Manual trigger — walks AMS-contracted customers, finds stale
+// (server, software) pairs, and creates Executions per (env, plan).
+// Returns a result list the SPA renders as a summary banner.
+export function checkForNeededExecutions(): Promise<{
+  results: import('./types').PatchExecutionCheckResult[]
+}> {
+  return request(`/patch-executions/check/`, { method: 'POST' })
 }
 
 export function updatePatchExecution(

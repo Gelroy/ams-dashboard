@@ -187,28 +187,37 @@ export interface PatchGroupStep {
   description: string
   est_time: string | null
   per_server: boolean
+  not_timed: boolean
 }
 
 export interface PatchGroup {
   id: string
   name: string
+  // Software UUIDs this group is meant to patch — drives which plans
+  // (via import) end up covering which softwares.
+  software_ids: string[]
+  software_names: string[]
   steps: PatchGroupStep[]
 }
 
-export interface PatchPlanGroupRef {
+// Plan-owned step. PatchPlanGroup is gone after the 2026-06-03 redesign —
+// plans copy steps from groups at import time and own them outright.
+export interface PatchPlanStep {
+  id: string
   patch_plan: string
-  patch_group: string
-  group_name: string
-  position: number
-  step_count: number
+  step_num: number
+  description: string
+  est_time: string | null
+  per_server: boolean
+  not_timed: boolean
 }
 
 export interface PatchPlan {
   id: string
   name: string
-  basket: string | null
-  basket_name: string | null
-  plan_groups: PatchPlanGroupRef[]
+  software_ids: string[]
+  software_names: string[]
+  plan_steps: PatchPlanStep[]
 }
 
 export type PatchExecutionStatus = 'active' | 'completed' | 'aborted'
@@ -219,6 +228,7 @@ export interface PatchExecutionStep {
   description: string
   est_time: string | null
   per_server: boolean
+  not_timed: boolean
   started_at: string | null
   finished_at: string | null
   total_time: string | null
@@ -240,8 +250,8 @@ export interface PatchExecution {
   id: string
   patch_plan: string | null
   plan_name: string | null
-  basket: string
-  basket_name: string | null
+  // Snapshot of the plan's software names at creation time, for display.
+  software_names: string[]
   organization: string
   organization_name: string
   environment: string
@@ -254,6 +264,15 @@ export interface PatchExecution {
   total_time: string | null
   steps: PatchExecutionStep[]
   aborts: PatchExecutionAbort[]
+}
+
+export interface PatchExecutionCheckResult {
+  execution_id: string | null
+  org_name: string
+  env_name: string
+  plan_name: string
+  created: boolean
+  reason: string
 }
 
 export interface PatchHistoryEntry {

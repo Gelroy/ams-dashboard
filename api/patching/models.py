@@ -3,16 +3,23 @@ import uuid
 from django.db import models
 from django.db.models import Q
 
-from baskets.models import Basket
 from customers.models import Environment, Organization, SoftDeleteModel
 from software.models import Software
 
 
 class PatchGroup(SoftDeleteModel):
-    """Reusable runbook fragment — a named, ordered list of steps."""
+    """Reusable runbook fragment — a named, ordered list of steps. Acts as a
+    *template* for plan construction: importing a group into a plan copies
+    its steps into the plan's own step table and unions its softwares into
+    the plan's software list, but the plan thereafter owns its own copies."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.TextField()
+    # Software this group is meant to patch. Drives which plans (via group
+    # import) end up covering which softwares. Zero, one, or many.
+    softwares = models.ManyToManyField(
+        Software, blank=True, related_name="patch_groups"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -38,6 +45,11 @@ class PatchGroupStep(models.Model):
     description = models.TextField(default="")
     est_time = models.TextField(null=True, blank=True)
     per_server = models.BooleanField(default=False)
+    # When True the step doesn't accumulate running patch time, and the
+    # execution UI lets the user click Done at any moment (no ordering gate).
+    # Useful for human-judgment checkpoints — "verify with customer", "wait
+    # for backup window", etc.
+    not_timed = models.BooleanField(default=False)
 
     class Meta:
         db_table = "patch_group_steps"
@@ -46,16 +58,18 @@ class PatchGroupStep(models.Model):
 
 
 class PatchPlan(SoftDeleteModel):
-    """Composes a Basket + ordered Groups for executing a patch run."""
+    """An ordered, software-targeted runbook the team executes against an
+    environment. Plans are built by importing Groups (one-shot copy of the
+    group's steps + softwares into the plan), then editing freely from
+    there. After import, the Group is forgotten by the Plan."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.TextField()
-    basket = models.ForeignKey(
-        Basket,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="patch_plans",
+    # Which softwares this plan is responsible for. Populated by group
+    # imports as a union, then independently editable. Drives the
+    # "Check for Needed Patch Executions" trigger.
+    softwares = models.ManyToManyField(
+        Software, blank=True, related_name="patch_plans"
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -75,19 +89,25 @@ class PatchPlan(SoftDeleteModel):
         return self.name
 
 
-class PatchPlanGroup(models.Model):
+class PatchPlanStep(models.Model):
+    """Plan-owned step. After a group is imported into a plan, the group's
+    PatchGroupSteps are copied into this table; editing the plan's steps
+    never touches the underlying PatchGroupStep templates."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     patch_plan = models.ForeignKey(
-        PatchPlan, on_delete=models.CASCADE, related_name="plan_groups"
+        PatchPlan, on_delete=models.CASCADE, related_name="plan_steps"
     )
-    patch_group = models.ForeignKey(
-        PatchGroup, on_delete=models.RESTRICT, related_name="plan_groups"
-    )
-    position = models.IntegerField()
+    step_num = models.IntegerField()
+    description = models.TextField(default="")
+    est_time = models.TextField(null=True, blank=True)
+    per_server = models.BooleanField(default=False)
+    not_timed = models.BooleanField(default=False)
 
     class Meta:
-        db_table = "patch_plan_groups"
-        unique_together = [("patch_plan", "patch_group")]
-        ordering = ["position"]
+        db_table = "patch_plan_steps"
+        unique_together = [("patch_plan", "step_num")]
+        ordering = ["step_num"]
 
 
 class PatchExecutionStatus(models.TextChoices):
@@ -101,7 +121,13 @@ class PatchExecution(SoftDeleteModel):
     patch_plan = models.ForeignKey(
         PatchPlan, on_delete=models.SET_NULL, null=True, blank=True, related_name="executions"
     )
-    basket = models.ForeignKey(Basket, on_delete=models.RESTRICT, related_name="executions")
+    # Snapshot of the plan's softwares at creation time. finalize_execution
+    # walks THIS list (not plan.softwares) when updating server installed
+    # entries, so a later edit to plan.softwares doesn't retroactively change
+    # what this in-flight execution patches.
+    softwares = models.ManyToManyField(
+        Software, blank=True, related_name="patch_executions"
+    )
     organization = models.ForeignKey(
         Organization, on_delete=models.CASCADE, related_name="patch_executions"
     )
@@ -125,8 +151,11 @@ class PatchExecution(SoftDeleteModel):
     class Meta:
         db_table = "patch_executions"
         constraints = [
+            # One live execution per (org, env, plan). Postgres NULL semantics
+            # mean rows with patch_plan IS NULL aren't deduped — manual
+            # plan-less executions can coexist freely, which is fine.
             models.UniqueConstraint(
-                fields=["organization", "environment", "basket"],
+                fields=["organization", "environment", "patch_plan"],
                 condition=Q(status="active", deleted_at__isnull=True),
                 name="patch_executions_one_active",
             ),
@@ -135,8 +164,9 @@ class PatchExecution(SoftDeleteModel):
 
 
 class PatchExecutionStep(models.Model):
-    """Snapshot of plan steps at execution-creation time. Plan/group edits
-    don't retro-affect a running execution."""
+    """Snapshot of plan steps at execution-creation time. Plan edits
+    don't retro-affect an in-flight execution (resync_pristine_executions
+    handles the not-yet-started case)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     patch_execution = models.ForeignKey(
@@ -146,6 +176,7 @@ class PatchExecutionStep(models.Model):
     description = models.TextField(default="")
     est_time = models.TextField(null=True, blank=True)
     per_server = models.BooleanField(default=False)
+    not_timed = models.BooleanField(default=False)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     total_time = models.TextField(null=True, blank=True)

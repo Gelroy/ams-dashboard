@@ -137,7 +137,7 @@ function PatchExecRow({ exec }: { exec: PatchExecution }) {
         <strong>
           {exec.organization_name} — {exec.environment_name}
         </strong>
-        <span className="meta">{exec.basket_name}</span>
+        <span className="meta">{exec.plan_name ?? exec.software_names.join(', ')}</span>
         <span className="meta" style={{ marginLeft: 'auto' }}>
           {exec.planned_date ? formatExecDate(exec.planned_date) : 'TBD'}
         </span>
