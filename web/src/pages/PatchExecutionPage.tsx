@@ -790,8 +790,12 @@ function PatchGroupStepRow({
         <input
           className="input compact"
           style={{ width: 40 }}
+          inputMode="numeric"
+          // Digits-only mask: strip everything else as the user types so
+          // the input can never hold a non-numeric value. Empty is allowed
+          // mid-edit; the onBlur handler rolls it back if no valid int.
           value={stepNum}
-          onChange={(e) => setStepNum(e.target.value)}
+          onChange={(e) => setStepNum(e.target.value.replace(/\D+/g, ''))}
           onBlur={() => {
             const n = parseInt(stepNum, 10)
             if (!Number.isFinite(n) || n === step.step_num) {
@@ -1132,8 +1136,12 @@ function PatchPlanStepRow({
         <input
           className="input compact"
           style={{ width: 40 }}
+          inputMode="numeric"
+          // Digits-only mask. The backend no longer enforces a unique
+          // (patch_plan, step_num) constraint, so the PATCH succeeds even
+          // when this row briefly collides with another during a renumber.
           value={stepNum}
-          onChange={(e) => setStepNum(e.target.value)}
+          onChange={(e) => setStepNum(e.target.value.replace(/\D+/g, ''))}
           onBlur={() => {
             const n = parseInt(stepNum, 10)
             if (!Number.isFinite(n) || n === step.step_num) {

@@ -53,8 +53,12 @@ class PatchGroupStep(models.Model):
 
     class Meta:
         db_table = "patch_group_steps"
-        unique_together = [("patch_group", "step_num")]
-        ordering = ["step_num"]
+        # No unique_together on (patch_group, step_num): editing the
+        # numbering inline produces transient duplicates as the user
+        # renumbers, and rejecting those PATCHes makes the UX brittle.
+        # The id secondary sort keeps display stable when two rows do
+        # share a step_num.
+        ordering = ["step_num", "id"]
 
 
 class PatchPlan(SoftDeleteModel):
@@ -106,8 +110,10 @@ class PatchPlanStep(models.Model):
 
     class Meta:
         db_table = "patch_plan_steps"
-        unique_together = [("patch_plan", "step_num")]
-        ordering = ["step_num"]
+        # Same rationale as PatchGroupStep: no unique constraint on
+        # (patch_plan, step_num) so inline renumbering doesn't reject
+        # PATCHes when two rows briefly collide.
+        ordering = ["step_num", "id"]
 
 
 class PatchExecutionStatus(models.TextChoices):
