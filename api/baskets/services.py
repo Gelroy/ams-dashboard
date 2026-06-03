@@ -28,6 +28,10 @@ def copy_installed_software(source_server_id, dest_server_id) -> int:
             software_id=entry.software_id,
             defaults={
                 "software_release": entry.software_release,
+                # The override is part of the server's configuration; if the
+                # source declares an interim Latest doesn't apply, the copy
+                # target inherits that same stance until someone changes it.
+                "functionally_latest": entry.functionally_latest,
             },
         )
         count += 1
@@ -69,7 +73,7 @@ def copy_server_details_to_env_peers(source_server) -> int:
     )
     source_installed = list(
         ServerInstalledSoftware.objects.filter(server=source_server).values(
-            "software_id", "software_release_id"
+            "software_id", "software_release_id", "functionally_latest"
         )
     )
 
@@ -91,6 +95,10 @@ def copy_server_details_to_env_peers(source_server) -> int:
                         server=dest,
                         software_id=e["software_id"],
                         software_release_id=e["software_release_id"],
+                        # Copy the override too — a UNIX-only-interim-fix
+                        # situation almost always applies to every server in
+                        # the env, not just the source.
+                        functionally_latest=e["functionally_latest"],
                     )
                     for e in source_installed
                 ]
