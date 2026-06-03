@@ -129,7 +129,7 @@ function CustomerAnalyticCard({
                 {customerAnalytic.history.map((h) => (
                   <tr key={h.id}>
                     <td className="meta">{new Date(h.captured_at).toLocaleString()}</td>
-                    <td>{h.value ?? '—'}</td>
+                    <td>{formatAnalyticValue(h.value)}</td>
                     <td>{h.description ?? '—'}</td>
                     <td>
                       <button
@@ -327,4 +327,15 @@ function AddCustomerAnalyticForm({
       {error && <span className="error-text">{error}</span>}
     </div>
   )
+}
+
+/** Strip trailing zeros from a DecimalField string so "100.0000" renders
+ *  as "100" and "100.5400" as "100.54". Storage stays Decimal — this is
+ *  display-only. Returns "—" for null/undefined. */
+function formatAnalyticValue(v: string | null | undefined): string {
+  if (v == null || v === '') return '—'
+  // Strip trailing zeros from the fractional part, then drop a dangling
+  // decimal point if nothing's left. Leaves whole numbers and meaningful
+  // decimals alone.
+  return v.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
 }
