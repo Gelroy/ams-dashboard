@@ -126,6 +126,9 @@ class CriticalCalendarView(APIView):
             )
 
         # Planned (not-yet-completed) patch executions with a planned_date set.
+        # Post-redesign label is "<Plan name>" if linked, else a short software
+        # list — the basket FK was dropped in patching/0004 and no longer
+        # contributes to the user-facing label.
         for pe in (
             PatchExecution.objects.filter(
                 status=PatchExecutionStatus.ACTIVE,
@@ -134,9 +137,15 @@ class CriticalCalendarView(APIView):
                 planned_date__gte=lookback_start,
                 planned_date__lt=end,
             )
-            .select_related("organization", "environment", "basket")
+            .select_related("organization", "environment", "patch_plan")
+            .prefetch_related("softwares")
         ):
             org = pe.organization
+            tail = (
+                pe.patch_plan.name
+                if pe.patch_plan
+                else (", ".join(s.name for s in pe.softwares.all()) or "no plan")
+            )
             events.append(
                 {
                     "date": pe.planned_date.isoformat(),
@@ -144,7 +153,7 @@ class CriticalCalendarView(APIView):
                     "kind": "patch_planned",
                     "label": (
                         f"Planned patch: {org.local_name or org.jira_name} "
-                        f"{pe.environment.name} — {pe.basket.name}"
+                        f"{pe.environment.name} — {tail}"
                     ),
                     "source_kind": "patch_execution",
                     "source_id": str(pe.id),
