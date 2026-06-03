@@ -43,11 +43,24 @@ def _unique_software_name(Software, desired: str, exclude_id=None) -> str:
 
 
 def squash_versions_up(apps, schema_editor):
+    from django.utils import timezone
+
     Software = apps.get_model("software", "Software")
     SoftwareVersion = apps.get_model("software", "SoftwareVersion")
     SoftwareRelease = apps.get_model("software", "SoftwareRelease")
     BasketSoftware = apps.get_model("baskets", "BasketSoftware")
     ServerInstalledSoftware = apps.get_model("baskets", "ServerInstalledSoftware")
+
+    # Cascade-soft-delete releases whose parent SoftwareVersion is itself
+    # soft-deleted. The old SPA walked software → versions → releases, both
+    # filtered by SoftDeleteManager, so these releases were invisible. After
+    # the squash they would suddenly surface on the grandparent Software,
+    # including any stale `Latest` flags — which would then violate the new
+    # one-Latest-per-Software unique constraint added in 0004.
+    SoftwareRelease.objects.filter(
+        software_version__deleted_at__isnull=False,
+        deleted_at__isnull=True,
+    ).update(deleted_at=timezone.now())
 
     # Default pass: every release gets pointed at its grandparent Software
     # via the (still-live) software_version FK. The per-version logic below
