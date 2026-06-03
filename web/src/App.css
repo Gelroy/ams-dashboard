@@ -196,11 +196,15 @@
   color: #047857;
 }
 
-/* ── Toggle-ish basket chips ── */
+/* ── Toggle-ish chips (baskets, Related Software, Softwares Covered) ──
+   Selected state mirrors the .patch-no "Up to Date" badge: a light green
+   tint with dark-green text. Previously this was inverted (dark fill,
+   white text) which was hard to read on busy screens. */
 .env-chip-on {
-  background: var(--color-text-primary);
-  color: var(--color-bg-primary);
-  border-color: var(--color-text-primary);
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #c8efde;
+  font-weight: 600;
   cursor: pointer;
 }
 .env-chip-off {
