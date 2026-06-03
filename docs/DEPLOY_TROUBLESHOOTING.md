@@ -24,6 +24,10 @@ to fix it. If you hit the same issue again, jump to that section.
 | `Stack with id AmsDashboardStack does not exist` after a failed deploy | [Rollback ate the resources](#rollback-ate-the-resources) |
 | Stack stuck in `ROLLBACK_COMPLETE` | [ROLLBACK_COMPLETE blocks redeploy](#rollback_complete-blocks-redeploy) |
 | `ResourceInitializationError: unable to retrieve secret from asm` | [No network path to AWS APIs](#no-network-path-to-aws-apis) |
+| `cannot ALTER TABLE … because it has pending trigger events` during migration | [Mixed DML+DDL in one transaction](#mixed-dml--ddl-in-one-transaction) |
+| Docker build fails with `TS2339: Property '…' does not exist on type` | [TypeScript catches stale field references](#typescript-catches-stale-field-references) |
+| ALB DNS changed unexpectedly after a deploy | [ALB scheme replacement on context drift](#alb-scheme-replacement-on-context-drift) |
+| Application log lines (logger.info/error) missing from CloudWatch | [Django logs not reaching CloudWatch](#django-logs-not-reaching-cloudwatch) |
 
 ---
 
@@ -461,3 +465,113 @@ should be flipped back once everything works:
 Reverting these gives you the production-clean behavior: log groups
 get cleaned up on stack delete, the circuit breaker rolls back to the
 previous task definition, and failed deploys self-clean.
+
+---
+
+## Mixed DML + DDL in one transaction
+
+**Symptom:** A migration that both deletes rows from a table and alters
+the same table fails with:
+
+```
+django.db.utils.OperationalError: cannot ALTER TABLE "patch_executions"
+because it has pending trigger events
+```
+
+**Cause:** Postgres defers FK-trigger constraint checks to commit by
+default. If the migration `RunPython`s a `DELETE` against a table with
+cascading FKs in the same transaction as a later `ALTER TABLE`, Postgres
+refuses the ALTER because the trigger events are still pending. This
+hit us in `patching/0004_redesign_software_centric.py` which both drops
+all `PatchExecution` rows and removes the `basket` FK.
+
+**Fix:** Set `atomic = False` on the migration so each operation runs
+in its own short transaction:
+
+```python
+class Migration(migrations.Migration):
+    atomic = False
+    dependencies = [...]
+    operations = [...]
+```
+
+The DELETE settles before the ALTER runs. The trade-off: a failure
+partway through leaves earlier operations applied — debug carefully, or
+split into two migrations.
+
+---
+
+## TypeScript catches stale field references
+
+**Symptom:** `cdk deploy` fails inside the SPA Docker build with:
+
+```
+src/pages/ActivitiesPage.tsx(140,38): error TS2339: Property
+'basket_name' does not exist on type 'PatchExecution'.
+ERROR: failed to build: … exit code: 2
+```
+
+**Cause:** A model refactor removed a field (e.g. `PatchExecution.basket`
+during the patching redesign) and the corresponding TypeScript type was
+updated, but some `.tsx` files still referenced the old field. `vite build`
+runs `tsc -b` first and TypeScript's strict-prop check rejects the build.
+
+**Fix:** Grep the SPA for every reference to the dropped field and update
+or remove. The deploy log line names the file and line. `npm run build`
+locally catches this before push if you run it; deploys without a
+pre-flight typecheck only catch it after Docker has spent time on the
+build.
+
+---
+
+## ALB scheme replacement on context drift
+
+**Symptom:** A deploy completes successfully but the ALB DNS has changed
+and the team can no longer reach the dashboard. The CloudFormation
+events show:
+
+```
+AWS::ElasticLoadBalancingV2::LoadBalancer (ApiServiceLB…)
+Requested update requires the creation of a new physical resource;
+hence creating one.
+```
+
+**Cause:** The `public_load_balancer` property on the ECS pattern's
+ALB went from one literal/value to another, even if the *effective*
+value is the same. Specifically: dropping the `-c public_alb=true`
+context flag while keeping the deploy otherwise identical flips the
+ALB from internet-facing back to internal. CDK is declarative — the
+absence of the flag means `False`, which forces a replacement.
+
+When the new ALB has scheme `internal-`, its DNS only resolves from
+inside the VPC. From outside, it doesn't resolve at all. Every
+teammate using the old DNS gets a connection-timed-out error.
+
+**Fix:** Always run via the `infra/scripts/deploy.sh` wrapper, which
+bakes in `public_alb=true` + `allow_public_http=true` so they can't be
+forgotten. If you do get bitten, redeploy with the flags restored —
+the ALB will be recreated again, this time as internet-facing, with
+yet another new DNS that needs to be re-shared.
+
+---
+
+## Django logs not reaching CloudWatch
+
+**Symptom:** `logger.info(...)` / `logger.exception(...)` calls in
+Django app code (e.g. in `signals.py` or `services.py`) don't appear in
+the `/ams-dashboard/api` log stream. CloudWatch only shows gunicorn
+access lines.
+
+**Cause:** Not yet root-caused — gunicorn writes its access log to
+stdout (captured by the `awslogs` driver) but Django's root logger output
+appears not to be reaching that same stdout in the running container.
+
+**Workarounds:**
+- For one-off probing, run a Django shell via `aws ecs run-task` with
+  a `command` override that runs the diagnostic inline. The shell's
+  print output goes to the migration log group and is visible.
+- For semi-permanent diagnostics, write to `PatchHistory` /
+  `Activity.notes` / a dedicated debug table rather than relying on
+  logger output.
+
+**Tracked in:** ARCHITECTURE.md §11.1.

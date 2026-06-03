@@ -38,25 +38,29 @@ The **AMS Dashboard** is an internal web application for the IMT AMS (Applicatio
 - **AWS CDK (Python)** defines everything — one `cdk deploy` provisions or updates the whole stack.
 - **Soft delete everywhere** in the data model — `deleted_at` timestamp preserves history rather than dropping rows.
 
-### Current deployment state (snapshot at time of writing)
+### Current deployment state (snapshot 2026-06-03)
 
 | Property | Value |
 |---|---|
 | AWS Account | `721082559106` (IMT-Support) |
 | Region | `us-west-2` |
 | VPC | `vpc-04b75b92656837be8` (CDK-created, 2 AZs, public + private-with-egress subnets, no NAT) |
-| ALB | `internet-facing`, HTTP only (HTTPS coming once ACM cert validates) |
-| ALB DNS | `AmsDas-ApiSe-LgNCAonjExh2-1426856071.us-west-2.elb.amazonaws.com` |
+| ALB | `internet-facing`, HTTP only (HTTPS pending ACM cert + domain) |
+| ALB DNS | `AmsDas-ApiSe-Ve9dUATmyXRB-7966907.us-west-2.elb.amazonaws.com` |
 | Target domain | `ams-dashboard.infomagnetics.com` (pending DNS) |
-| Aurora cluster | `amsdashboardstack-db5d02a0a9-smiqefm0qfai`, Postgres 16.4, SLv2 0.5–2 ACU |
+| Aurora cluster | `amsdashboardstack-db5d02a0a9-smiqefm0qfai`, Postgres 16.11, SLv2 0.5–2 ACU |
+| Aurora protections | `deletion_protection=true`, 7-day automated retention, plus the manual snapshot `ams-manual-2026-06-03-data-entry` |
 | Cognito User Pool | `us-west-2_Bao82CnNc` |
 | Cognito App Client | `42cotc6iun8ttt8sea4mkfp2h6` |
+| Cognito Groups | `admin` (full read/write) + `viewer` (read-only stakeholders, currently empty); see §4.4.3 |
 | ECS Cluster | `AmsDashboardStack-ClusterEB0386A7-D1161Vswl3Iu` |
 | API Fargate Service | 1× task, 256 CPU / 512 MiB, in public subnet with `AssignPublicIp=ENABLED` |
 | Scheduled tasks | JiraSyncOrgs (6h), JiraSyncUsers (6h), JiraSyncTickets (30 min) |
 | Bastion EC2 | `i-08bd75fe381f36674` (t4g.nano) — SSM-managed, no inbound SG rules |
 | ACM cert (pending) | `arn:aws:acm:us-west-2:721082559106:certificate/317ed450-7572-4d19-936f-2975c1826b35` |
 | **Approx monthly cost** | **~$85–90/mo** with current sizing |
+
+The ALB DNS will change whenever its `public_load_balancer` property is toggled or the ACM cert is finally wired up. The previous DNS values (`amsdas-apise-lgncaonjexh2-…`, `internal-AmsDas-ApiSe-FLsYDPfTrT41-…`) are dead — bookmarks should point at the value above until a real domain is in front.
 
 ### Repo layout
 
@@ -163,8 +167,9 @@ Every AWS resource currently provisioned by the stack, grouped by layer.
 
 ### 2.2 Resource lifecycle policies
 
-- **Aurora cluster:** `removalPolicy=SNAPSHOT` — `cdk destroy` takes a final snapshot before deletion.
-- **Cognito User Pool:** `removalPolicy=RETAIN` — `cdk destroy` leaves it intact (preserves user accounts).
+- **Aurora cluster:** `removalPolicy=SNAPSHOT` — `cdk destroy` takes a final snapshot before deletion. Also `deletion_protection=true` as of 2026-06-03: any `aws rds delete-db-cluster` call is refused at the API level until protection is explicitly disabled.
+- **Aurora backups:** 7-day automated snapshot retention (configurable via `BackupProps`). Plus on-demand manual snapshots — currently `ams-manual-2026-06-03-data-entry` exists as a long-term restore point.
+- **Cognito User Pool:** `removalPolicy=RETAIN` — `cdk destroy` leaves it intact (preserves user accounts and group membership).
 - **CloudWatch Log Groups:** `removalPolicy=RETAIN` — survive stack rollbacks/destroys, so container stdout from failed deploys remains debuggable.
 - **Everything else:** default (destroyed with the stack).
 
@@ -373,14 +378,37 @@ class CognitoJWTAuthentication(authentication.BaseAuthentication):
 
 **Gotcha worth knowing:** the `aud` claim is only set on Cognito **id_tokens**, not on access_tokens. The SPA must send the id_token. Sending the access_token will fail verification because it has `client_id` instead of `aud`. The login views (next section) return both; the React `LoginPage` stores the id_token.
 
+`_CognitoUser` also parses the `cognito:groups` claim and exposes a `.is_admin` property — driving the role gate (§4.4.3).
+
 #### 4.4.2 `auth_views.py` — login & challenge
 
-Two `@api_view` functions, both `authentication_classes=[]` and `permission_classes=[AllowAny]` so they can be called without an existing token.
+Three `@api_view` functions, all `authentication_classes=[]` and `permission_classes=[AllowAny]` so they can be called without an existing token — except `me` which uses `IsAuthenticated` so viewers can call it to discover their own role:
 
 - `login(request)` — POSTs `{username, password}` to Cognito's `InitiateAuth` with `USER_PASSWORD_AUTH`. Returns `{id_token, access_token, refresh_token?, expires_in, token_type}` on success, or `{challenge, session, username}` if Cognito returns `NEW_PASSWORD_REQUIRED`. Maps Cognito error codes to clean HTTP responses (401 for bad creds, 403 for password-reset-required or unconfirmed users, 400 for everything else).
 - `challenge_new_password(request)` — POSTs `{session, username, new_password}` to Cognito's `RespondToAuthChallenge`. Returns the same `AuthenticationResult` shape on success.
+- `refresh(request)` — POSTs `{refresh_token}` to Cognito's `REFRESH_TOKEN_AUTH` flow. Powers the SPA's silent-refresh; bypasses re-login when a bearer call 401s mid-session.
+- `me(request)` — `GET /api/me/`. Returns `{username, email, groups, is_admin}` from the JWT claims. The SPA fetches this on mount to decide whether to render the read-only banner.
 
-Both use `boto3.client('cognito-idp', region_name=settings.COGNITO_REGION)`. `InitiateAuth` and `RespondToAuthChallenge` are **unauthenticated** Cognito operations (the user's password proves identity), so the task role does not need any `cognito-idp:*` IAM permissions.
+All three Cognito-talking views use `boto3.client('cognito-idp', region_name=settings.COGNITO_REGION)`. `InitiateAuth` and `RespondToAuthChallenge` are **unauthenticated** Cognito operations (the user's password proves identity), so the task role does not need any `cognito-idp:*` IAM permissions.
+
+#### 4.4.3 Role gate — `permissions.py` + Cognito groups
+
+In-app roles are stored as Cognito User Pool groups, surfaced on the JWT's `cognito:groups` claim. The pool has two groups (created by CDK):
+
+- `admin` (precedence 1) — full read/write. The AMS team lives here.
+- `viewer` (precedence 10) — read-only. Intended for read-only stakeholders. Currently empty; behavior is the same as "no group at all" since the permission class only checks for `admin`.
+
+The DRF permission class `IsAdminOrReadOnly` (in `ams_dashboard/permissions.py`) is wired as `DEFAULT_PERMISSION_CLASSES` when `AUTH_BYPASS=0`:
+
+- `SAFE_METHODS` (GET/HEAD/OPTIONS) → any authenticated user passes.
+- Writes (POST/PATCH/PUT/DELETE + custom `@action` writes) → require `admin` in `user.groups`; otherwise 403 with a clear message.
+
+The dev path (`AUTH_BYPASS=1`) still uses `AllowAny` — no role gate in local Docker.
+
+**Operationally:**
+- Promote a user: `aws cognito-idp admin-add-user-to-group --user-pool-id us-west-2_Bao82CnNc --username <email> --group-name admin`.
+- Group membership is baked into the id_token at issue time — a user must log out + back in for a newly added group to take effect.
+- SPA renders an amber "Read-only access" banner at the top of every authenticated page when `me.is_admin === false`. Individual write buttons are NOT hidden in this phase; writes 403 from the backend and surface the error inline.
 
 ### 4.5 SPA fallback (`spa.py`)
 
@@ -478,52 +506,64 @@ Three commands invoked by the scheduled Fargate tasks:
 
 #### 4.6.2 `software/` — Software catalog
 
-Three models forming a strict hierarchy: `Software → SoftwareVersion → SoftwareRelease`. Each has a `status` enum (Latest / Supported / EOL). The crucial business rule: **at most one Latest per parent**, enforced via DB constraints and via `_demote_existing_latest()` in `views.py` that wraps create/update in `@transaction.atomic` and demotes any other Latest sibling to Supported before saving the new one.
+Two-level hierarchy: `Software → SoftwareRelease`. The middle `SoftwareVersion` layer was squashed away in migration `software/0003+0004` (2026-06-03) — each `Software` row now carries its version label and lifecycle status directly. Multi-version Software rows were forked into one row per version at migration time (e.g. "Zabbix" with v4.2/v5.0/v7.4 became "Zabbix 4.2", "Zabbix 5.0", "Zabbix 7.4").
 
-Used to drive:
-- Patching status (a server is "needs patching" if its installed release isn't the Latest in its pinned version)
-- Patch execution finalization (moves all assigned servers' installed software to the current Latest)
+- **`Software`** — `(name, version, status, description)`. Unique on `name`. Lifecycle status ∈ {Latest, Supported, EOL}.
+- **`SoftwareRelease`** — `(software FK, release_name, released_on, status, position)`. Unique on `(software, release_name)` and one-Latest-per-software.
 
-Routes are triple-nested via `drf-nested-routers`:
+The "at most one Latest sibling" rule is still enforced by `_demote_existing_latest()` in `views.py`, atomically demoting any prior Latest release when a new one is promoted.
+
+Routes flattened with the middle layer gone:
 - `/api/software/`
-- `/api/software/{software_id}/versions/`
-- `/api/software/{software_id}/versions/{version_id}/releases/`
+- `/api/software/{software_id}/releases/`
 
-#### 4.6.3 `baskets/` — Deployment baskets & server pinning
+The auto-create-PatchExecution-on-new-Latest signal that used to live here was retired in the 2026-06-03 patching redesign — see §4.6.4. `software/services.py` and `software/signals.py` are now placeholder stubs with docstrings explaining the move.
 
-The "basket" is a named bundle of (software → pinned version) pairs. Servers are assigned to one or more baskets; the dashboard then reports patching status based on whether each server's installed software matches the Latest release of its basket's pinned version.
+#### 4.6.3 `baskets/` — Logical software groupings & server pinning
+
+After the patching redesign, baskets serve a narrower role: they're a **logical bundle of softwares** that auto-populates a server's installed-software rows when assigned. They are no longer involved in patching automation.
 
 Key models:
-- `Basket(name, description)`
-- `BasketSoftware(basket, software, software_version)` — pins one version per software per basket
-- `ServerBasket(server, basket)` — M2M between servers and baskets
-- `ServerInstalledSoftware(server, software, software_version, software_release, recorded_at)` — what's actually running
+- `Basket(name, description)` — named group.
+- `BasketSoftware(basket, software)` — which softwares the basket pins. `software_version` FK was dropped in baskets/0003 since `Software` is now a specific version.
+- `ServerBasket(server, basket)` — many-to-many: which baskets a server is assigned to.
+- `ServerInstalledSoftware(server, software, software_release, functionally_latest, recorded_at)` — what's actually running.
+  - `functionally_latest` is a per-server override (added 2026-06-03): when true, this server's installed release is treated as Latest for needs-patching purposes, regardless of the catalog. Used when an interim release doesn't apply (e.g. UNIX-only release on a Windows customer). Sticky across catalog Latest changes; auto-resets when `finalize_execution` moves the server to the actual Latest.
 
-`baskets/services.py` is where the "needs patching" logic lives:
+`baskets/services.py`:
+- `server_needs_patching(server)` → `"yes"` / `"no"` / `"unknown"`. Short-circuits to "no" when `functionally_latest` is set.
+- `organization_needs_patching(org)` / `organization_patching_rollup(org)` — roll-up across servers.
+- `copy_installed_software(source, dest)` — used by the Add Server "Include Existing Software?" flow.
+- `copy_server_details_to_env_peers(source_server)` — used by the "Copy to Environment" button in expanded Server Details; replaces every peer's notes + basket assignments + installed software (including `functionally_latest`).
 
-- `server_needs_patching(server)` → `"yes"` / `"no"` / `"unknown"`
-- `organization_needs_patching(org)` → roll-up across all its servers
+`baskets/signals.py` auto-creates `ServerInstalledSoftware` rows when a basket is assigned to a server or a new software is added to an assigned basket — defaulting the installed release to the basket's Software's current Latest.
 
-`baskets/signals.py` auto-creates `ServerInstalledSoftware` rows when a basket is assigned to a server or new software is added to an existing basket. Defaults the installed release to the current Latest so a fresh assignment doesn't immediately flag as "needs patching."
+#### 4.6.4 `patching/` — Software-centric patch plans & executions
 
-#### 4.6.4 `patching/` — Patch plans & executions
+The patching domain was substantially redesigned 2026-06-03 (migration `patching/0004`). Patching is now mapped to **Software directly**, not Baskets. Plans own their own steps (groups become one-shot import templates), and execution creation is **manually triggered** from the SPA — the auto-create-on-new-Latest signal is gone.
 
-The patching workflow is the most state-rich part of the system:
+Templates (reusable):
+- **`PatchGroup`** + **`PatchGroupStep`** — reusable runbook fragments. `PatchGroup` has an M2M to `Software`. Steps have a `not_timed` bool for human-judgment checkpoints (no elapsed-time accumulation, Done-at-any-time).
 
-- **`PatchGroup`** + **`PatchGroupStep`** — reusable runbook fragments (e.g. "stop service / backup / patch / verify / restart").
-- **`PatchPlan`** + **`PatchPlanGroup`** — an ordered composition of groups; can be linked to a specific `Basket`.
-- **`PatchExecution`** — one execution of a plan against a specific (organization, environment, basket). Constraint: at most one active execution per (org, env, basket).
-- **`PatchExecutionStep`** — *snapshot* of the plan's steps at the moment the execution was created. Edits to the original plan groups don't affect in-flight executions.
-- **`PatchExecutionAbort`** — immutable record of every abort attempt (with notes), kept across retries.
-- **`PatchHistory`** — immutable rows written when an execution finalizes; one per (org, env, software, from_release, to_release).
+Plans (the document the team executes against):
+- **`PatchPlan`** — has an independent M2M to `Software` (the softwares this plan is responsible for) and owns its steps directly. `PatchPlanGroup` was deleted: importing a group into a plan copies the group's steps into `PatchPlanStep` and unions its softwares into the plan's M2M; the plan never refers back to the group.
+- **`PatchPlanStep`** — plan-owned step. Same fields as `PatchGroupStep` (description, est_time, per_server, not_timed). No unique constraint on (plan, step_num) — inline renumbering produces transient duplicates which the UX needs to tolerate; display ordering breaks ties on `id`.
 
-`patching/services.py` has the workflow operations:
+Executions:
+- **`PatchExecution`** — one execution per `(organization, environment, patch_plan)`. Snapshot M2M `softwares` (frozen at create time). Unique-active constraint enforces at most one active execution per `(org, env, plan)`.
+- **`PatchExecutionStep`** — snapshotted from `PatchPlanStep` at create time. Carries `not_timed`. Renumbered sequentially from 1 (so executions never see duplicate step_num even though plans can).
+- **`PatchExecutionAbort`** — unchanged.
+- **`PatchHistory`** — unchanged.
 
-- `snapshot_steps_from_plan(execution, plan)` — copies group steps onto the execution, renumbering 1..N
-- `mark_step_done(execution, step)` — sets timestamps, triggers `finalize_execution()` if the last step
-- `finalize_execution(execution)` — bumps all assigned servers' installed software to Latest, writes `PatchHistory` rows, marks execution `completed`
-- `abort_execution(execution, notes)` — appends a `PatchExecutionAbort`, resets the execution's step state for retry
-- `format_elapsed(start, end)` — `"Xh Ym Zs"` helper for the UI
+`patching/services.py`:
+- `snapshot_steps_from_plan(execution, plan)` — reads `plan.plan_steps` directly (no group walk).
+- `mark_step_done(execution, step)` — special-cases `not_timed` steps (flip done flag, skip timing bookkeeping; for timed steps walks backward over not_timed siblings when seeding `started_at`).
+- `finalize_execution(execution)` — walks `execution.softwares` (the snapshot) to update server installed releases. Resets `ServerInstalledSoftware.functionally_latest` on each affected row.
+- `check_for_needed_executions()` — **new manual trigger**, called from `POST /api/patch-executions/check/`. Walks AMS-contracted orgs × envs, finds (server, software) pairs where installed_release ≠ Latest AND NOT `functionally_latest`, then creates one `PatchExecution` per `(env, plan)` for every plan covering any stale software. Dedupes; skips when an active execution already exists.
+- `resync_pristine_executions(plan)` — when plan steps change, re-snapshots active executions that haven't started running. Softwares are NOT re-snapped (frozen at creation).
+- `abort_execution`, `reset_execution`, `format_elapsed` — unchanged.
+
+`patching/signals.py` watches `PatchPlanStep` post_save/post_delete now (not `PatchGroupStep` / `PatchPlanGroup`) — plan-step edits ripple to pristine executions; group-step edits don't.
 
 #### 4.6.5 `analytics/` — Per-customer metric captures
 
@@ -764,7 +804,9 @@ Two password fields (new + confirm), with client-side check that they match. Sub
 A simple data table. Top of the page:
 
 - "Customers" header with the total count
-- Filter bar: free-text search (matches `jira_name` OR `local_name` icontains) + an AMS-level dropdown (All / Essential / Enhanced / Expert)
+- Filter bar: free-text search (matches `jira_name` OR `local_name` icontains) + a "Hide customers without AMS level" checkbox (default checked — only AMS-contracted customers show)
+
+Columns: Name (links to detail), AMS Level badge, Automated tickets, Manual tickets, Zabbix status dot (green/yellow/red, or "N/A" for `not_using_zabbix`), Patching status dot (green/yellow/red rollup), Cert status dot (red if any expired, yellow if any within 30 days, green otherwise), Country (US/CA). Sort order: Expert → Enhanced → Essential → unassigned, then alphabetical by display name within each tier.
 
 Table columns: Name (link to detail page), AMS Level (Badge), Zabbix (Badge), Open Tickets, Patching (yes/no/unknown), Last JIRA Sync.
 
@@ -772,44 +814,50 @@ Empty / loading / error states are handled explicitly with single-row "Loading�
 
 ### 7.3 Customer detail (`/customers/:id`)
 
-The most feature-rich page. Four collapsible sections.
+The most feature-rich page. Five collapsible sections; **Users** starts collapsed by default, the rest open.
 
-**Details section.** Shows JIRA name + ID at the top. Editable fields: company-name override (`local_name`), AMS level dropdown, Zabbix status dropdown, help-desk phone, notes textarea. Buttons: "Save Changes" / "Cancel" appear when the form is dirty.
+**Details section.** Form-grid layout. Top to bottom:
+- Company-name override (`local_name`) + AMS level dropdown (one row).
+- Documents (wide) — list with Open/Edit/Delete per row + Add form.
+- SMEs (wide, read-only — set on the Staff page) — chips with mailto/tel links.
+- **Primary Basket (wide, new 2026-06-03)** — dropdown of all defined baskets. Auto-PATCHes on change (no Save click needed). The basket's pinned softwares render as chips directly below as `name (version)` — at-a-glance reference stack for the customer.
+- Roadmap (wide, collapsible) — long-form strategic notes.
+- Notes (wide, collapsible) — operational day-to-day notes.
+- Open Tickets meta + Last JIRA Sync meta (one row).
+- **Bottom row (low-edit fields):** Help Desk # + Country (one row); Not Using Zabbix checkbox alone on the last row; Save Changes button.
 
-The Documents subsection replaces the old single connection-guide URL. Lists each document as a row with Open / Edit / Delete buttons. "Add Document" reveals an inline form with description + URL fields.
-
-The SMEs subsection lists `staff_member.sme_organization_ids` containing this org — read-only here; editing happens on the Staff page.
-
-A meta footer shows `open_ticket_count` (with sync timestamp) and `jira_synced_at`.
+Most fields use batched on-Save edits via the "Save Changes" button. Primary Basket is an exception — it PATCHes immediately so the chip list refreshes without a save click.
 
 **Customer Systems section** (via `CustomerSystemsSection` component).
 
-- Environment chips at the top (DEV, TEST, PROD by default + any added). Each chip has an X to remove (only enabled if no servers in that env). Add-environment inline form.
-- Server table with columns: expand chevron, name, environment, cert expiry, patching status badge, delete.
-- Expanding a server reveals two panels:
-  - **Assigned baskets**: toggleable chips showing which baskets the server is in. Click an "off" chip to assign, "on" chip to remove.
-  - **Installed software**: per-software rows showing software name + version dropdown + release dropdown + delete. Cascading select form at the bottom to add a new software entry.
+- Environment chips at the top. Each chip has an X to remove (disabled if any server is in that env). Add-environment inline form.
+- Server table columns: expand chevron, name, IP address (masked input), env badge, basket names, cert-expires-on, patching badge, delete.
+- Expanding a server reveals:
+  - Top-right **"Copy to Environment"** button — confirms and bulk-applies this server's notes, basket assignments, and installed software (including the `functionally_latest` flag) to every other server in the same environment.
+  - **Assigned baskets**: toggleable chips. The selected state uses a light-green tint with dark-green text (not inverted to white).
+  - **Installed software**: per-row showing software name + version label + release dropdown + **Functionally Latest checkbox** (per-server override that treats the installed release as Latest for needs-patching) + delete.
 
 All edits are optimistic with on-blur saves; a brief error banner surfaces if a save fails.
 
-**Users section.** Table of `OrgUser` rows. JIRA-supplied fields (name, email) are read-only. Editable: role text field, alerts checkbox, primary checkbox. Saves on blur.
+**Users section** (collapsed by default). Table of `OrgUser` rows. JIRA-synced display name and email are read-only by default but can be overridden via `local_display_name` / `local_email` — the JIRA value remains visible as a tooltip. Editable: role, alerts checkbox, primary checkbox, AMS Report checkbox, hide checkbox. Saves on blur.
 
-**Analytics section** (via `CustomerAnalyticsSection` component). One row per `CustomerAnalytic` showing the metric definition, target environment/server, frequency, and capture count. Expanding a row reveals the capture history as a table (when / value / description / delete). A "Record" form at the bottom of each metric adds a new capture. An "Add Metric" form adds a new `CustomerAnalytic` to this org, with cascading scope-aware selects (server dropdown disabled if scope=environment).
+**Analytics section** (via `CustomerAnalyticsSection` component). One row per `CustomerAnalytic` showing the metric definition, target environment/server, frequency, and capture count. Expanding a row reveals the capture history (when / value / description / delete). Value rendering strips trailing zeros and adds thousands separators ("100.0000" → "100", "1234567" → "1,234,567"). A "Record" form at the bottom of each metric adds a new capture. An "Add Metric" form adds a new `CustomerAnalytic`, with cascading scope-aware selects.
+
+**Patch History section.** Per-software, per-environment timeline of `PatchHistory` rows for this customer.
 
 ### 7.4 Critical Events Calendar (`/critical`)
 
-Aggregated forward-looking calendar covering the next 6 weeks (server-capped at 12). Single GET to `/api/critical/?weeks=6` on mount.
+Aggregated calendar covering the past 6 weeks + next 6 weeks (server-capped at 12 forward). Single GET to `/api/critical/?weeks=6` on mount.
 
-Header: "Critical — next 6 weeks · N events". Single checkbox: "Hide weekends".
+Header: "Critical — past 6 weeks + next 6 weeks · N events". Single checkbox: "Hide weekends".
 
-Body: events grouped by date, each event row showing:
-- Date (only on the first row of each date group)
-- Time (or "—" for all-day events like cert expirations)
-- Kind badge (Cert / Patch / activity type)
-- Label (e.g. "Cert expires: webserver-prod-01")
-- Organization name (linked to the org's detail page if `organization_id` is present)
+**Split layout:** events are now split into two sections divided by panel headers:
+- **Upcoming Tasks** (today + future, chronological) — today's row still highlighted.
+- **Overdue Tasks** (past, reverse-chronological — most recently missed first).
 
-Today's row is highlighted if it has events. Cert events use `Server.cert_expires_on`; patch events come from `PatchHistory`; activity events come from scheduled `Activity` rows.
+Each event row shows: Time (or "—"), Kind badge (Cert / Patch / Patch_planned / activity type), Label (with `EXPIRED:` or `OVERDUE:` prefix when applicable), organization-name link.
+
+Date headers include the year ("Sun Jun 02, 2026") since the 12-week window can cross a year boundary. Cert events use `Server.cert_expires_on`; patch events come from `PatchHistory`; planned-patch events come from active `PatchExecution` rows with a `planned_date`; activity events come from scheduled `Activity` rows.
 
 ### 7.5 Activities (`/activities`)
 
@@ -821,33 +869,38 @@ Clicking a card expands an edit form for the same fields plus a notes textarea. 
 
 Add-activity inline form (revealed by the button) collects name, date+time, type, priority, customer, assigned staff, then closes after a successful create.
 
-### 7.6 Versions (`/versions`)
+### 7.6 Software Catalog (`/versions` — nav label "Software")
 
-Software catalog. Triple-nested cards: Software → Version → Release.
+Two-level cards (post-squash): **Software → Release**. The route path stays `/versions` so existing bookmarks resolve.
 
-- Top-level software cards: name (inline editable), version count, delete X.
-- Expand a software card to see its versions, each editable inline + status dropdown (Latest / Supported / EOL).
-- Expand a version card to see its releases — each release shows the version prefix as a label, a freeform suffix input, a release date, a status dropdown, and a Latest badge if applicable.
+- Software cards: name + version (both inline editable) + status dropdown (Latest / Supported / EOL) + release count + delete X. Add Software form at bottom requires both name and version up front.
+- Expand a software card to see its releases — each release shows the version prefix as a label, a freeform suffix input, a release date, a status dropdown, and a Latest badge if applicable.
 
-The atomic-demote logic (§4.6.2) means selecting a status of "Latest" on any sibling silently demotes the previous Latest to "Supported".
-
-Bottom of each level: an inline "+ Add …" form.
+The atomic-demote logic (§4.6.2) means selecting a status of "Latest" on any sibling release silently demotes the previous Latest to "Supported".
 
 ### 7.7 Baskets (`/baskets`)
 
-Version baskets — bundles of software-at-pinned-versions used to drive patching status.
+After the patching redesign, baskets are purely logical software groupings — the basket auto-populates a server's installed-software when the server is assigned to it.
 
 Cards per basket: editable name, description, software count, delete X. Expand to see:
-- Software list rows: software name + pinned version dropdown + computed Latest-release display + remove.
-- Bottom add form: cascading software dropdown → version dropdown → "+ Add".
+- Software list rows: software name + version label (badge: `name (version) — status`) + computed Latest-release display + remove.
+- Bottom add form: pick a Software from the dropdown — the version is intrinsic to the Software row now, no separate version select.
+
+To change a basket's pinned version: remove the current Software entry and add the new Software (e.g. swap "Apache 2.4" for "Apache 2.6").
 
 ### 7.8 Patch Execution (`/patch-execution`)
 
-Three-tab page: **Groups**, **Plans**, **Executions**.
+Three-tab page with **Executions** first (the daily-work surface), then **Groups** and **Plans**.
 
-- **Groups tab.** Cards of `PatchGroup` rows. Expand to see the group's steps in a table (number / description / est. time / per-server checkbox / delete). Inline form to add a new step.
-- **Plans tab.** Cards of `PatchPlan` rows. Expand to choose a basket (dropdown), reorder/remove groups (each group shows its step count), and add a group from a dropdown of available groups.
-- **Executions tab.** "Add Execution" form picks (customer → environment → basket); the basket selection auto-suggests the matching plan. Each active execution shows its progress as a step table with per-step Done buttons. Last step's Done triggers `finalize_execution` server-side (writes `PatchHistory`, advances `ServerInstalledSoftware`, marks completed). Abort flow surfaces a notes field; "Confirm Abort" records the attempt and resets steps.
+- **Executions tab.** Top action row: **"Check for Needed Patch Executions"** button + "+ Add Execution". The Check button calls `POST /api/patch-executions/check/` which walks AMS-contracted customers, finds stale (server, software) pairs (`installed_release != Latest AND NOT functionally_latest`), and creates one execution per `(env, plan)` for every plan whose softwares M2M covers any stale software. Results render in a dismissable banner summarising created/skipped per row.
+
+  Each active execution card shows: org-env header, plan name, software-list snapshot, planned-date (click to edit), step table. Per-step Done buttons. `not_timed` steps render `(not timed)` next to the description, hide their Elapsed input, and Done is always enabled (no prior-step gating). Timed-step gating walks backward over `not_timed` siblings when deciding when the next timed step unlocks. Last step's Done triggers `finalize_execution` server-side (writes `PatchHistory`, advances `ServerInstalledSoftware` per `execution.softwares` snapshot, resets each affected row's `functionally_latest`, marks completed).
+
+  Abort flow: notes field required, "Confirm Abort" records the attempt and resets steps. Reset is a clean restart (no abort logged).
+
+- **Groups tab.** Cards of `PatchGroup` rows. Expand for the Software chip-picker (M2M to Software) and the steps table (#/description/est/per-server/NOT Timed/delete). Step # is digits-only-masked; renumbering produces transient duplicates which the UI tolerates (display sort breaks ties on `id`).
+
+- **Plans tab.** Cards of `PatchPlan` rows. Expand for: Software chip-picker (independent of any group); steps table (plan-owned, same columns as Groups); "+ Add Step" form + "+ Import from Group…" dropdown. Importing a group is a one-shot copy — the group's steps get appended to the plan's step list, the group's softwares get unioned into the plan's softwares, and the plan never refers back to the group afterward.
 
 ### 7.9 Analytics definitions (`/analytics`)
 
@@ -868,23 +921,30 @@ Cards per staff member. Editable: name, email, phone. Expand for the SME assignm
 
 ### 8.1 Deploy a code change
 
-From any machine that has been bootstrapped per `docs/DEPLOY.md`:
+The day-to-day path is the wrapper script:
+
+```bash
+./infra/scripts/deploy.sh --yes
+```
+
+It activates the CDK venv, silences the jsii Node-version banner, bakes in the three context flags the running stack needs (`create_vpc=true`, `public_alb=true`, `allow_public_http=true`), turns on `pipefail` so a Docker build failure actually fails the deploy, and tees output to `/tmp/cdk-deploy-<timestamp>.log`. When HTTPS lands, set `ACM_CERT_ARN=arn:…` in the environment — the wrapper swaps `allow_public_http=true` for `acm_cert_arn=…` automatically.
+
+The equivalent raw `cdk deploy` if you ever need to bypass the wrapper:
 
 ```bash
 cd infra
 source .venv/bin/activate
 export JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION=1
-cdk deploy --profile ams-admin \
-  -c account=721082559106 -c region=us-west-2 \
+AWS_PROFILE=ams-admin AWS_REGION=us-west-2 cdk deploy AmsDashboardStack \
   -c create_vpc=true \
   -c public_alb=true \
-  -c acm_cert_arn=arn:aws:acm:us-west-2:721082559106:certificate/317ed450-7572-4d19-936f-2975c1826b35 \
+  -c allow_public_http=true \
   --require-approval never
 ```
 
-Context flags must match the *current* desired state on every deploy — CDK is declarative, so dropping a flag will revert it.
+Context flags must match the *current* desired state on every deploy — CDK is declarative, so dropping a flag will revert it. Forgetting `public_alb=true` flips the ALB back to internal scheme and changes its DNS, locking everyone out until reversed. (This is exactly what the `deploy.sh` wrapper exists to prevent.)
 
-Typical timing: 4–8 min for an API-code-only change (Docker rebuild dominates), 12+ min for VPC/ALB changes.
+Typical timing: 4 min for a code-only change with Docker layers cached; 7–8 min if the API image rebuilds from scratch. ALB scheme changes add another 3 minutes for the LB replacement.
 
 ### 8.2 Run a migration after a deploy
 
@@ -1052,35 +1112,38 @@ Approximate steady-state monthly cost for the current configuration (low-traffic
 
 ### 11.1 Infrastructure
 
-- **HTTPS not yet active** — pending ACM cert DNS validation by the parent admin (CNAME issued at the start of this work).
+- **HTTPS not yet active** — ALB is internet-facing on HTTP. ACM cert was issued (`317ed450-…`) but the DNS validation CNAME hasn't been wired up at the parent domain, and no Route 53 record points at the ALB. Until that lands, the SPA login posts passwords over plain HTTP. The team explicitly accepted the risk for the internal-app phase; not for production-team customer use.
 - **No WAF** — public ALB has no rate-limiting beyond Cognito's per-user lockout.
-- **No CloudWatch alarms** — nothing alerts on task crashes, health-check failures, NAT throughput, etc.
-- **No backup automation beyond Aurora's defaults** — 7-day snapshot retention is the only DR.
+- **No CloudWatch alarms** — nothing alerts on task crashes, health-check failures, sync failures, NAT throughput, etc.
+- **Aurora storage not encrypted at rest** — storage-level confidentiality, not a data-loss risk. Enabling requires a cluster recreate; deferred.
 - **Aurora master credential rotation Lambda not deployed** — rotation today is manual.
 - **No monitoring of the JIRA sync jobs' success/failure** — a silent sync failure today only surfaces when the dashboard data goes stale.
+- **Django application logs aren't reaching CloudWatch** — only gunicorn access logs do. `logger.info(...)` calls from Django apps (e.g. signal handlers, sync jobs) don't appear in the `/ams-dashboard/api` log group, which made debugging the no-PatchExecution-on-new-Latest issue harder than it needed to be.
 - **Bastion EC2 lives outside the CDK stack** — created by manual `aws ec2 run-instances` during deploy. Move it into the stack (or remove it once HTTPS is live and SSM tunneling is no longer needed).
+- **Closed since v1:** Aurora deletion protection enabled, manual recovery snapshot taken, `RemovalPolicy.SNAPSHOT` confirmed.
 
 ### 11.2 Application
 
 - **No Django superuser exists in the deployed DB** — `/admin` login fails for everyone, which is a feature for security but a bug if anyone needs admin access. Run `python manage.py createsuperuser` via a one-off ECS task to create one when needed.
 - **No password reset flow** — Cognito supports `ForgotPassword` natively but the SPA has no UI for it.
-- **No refresh-token handling** — sessions effectively expire after 1 hour (Cognito access-token TTL). Users are bounced to /login and have to re-enter their password.
 - **No MFA** — Cognito supports it but the user pool wasn't configured with `mfa=ON|OPTIONAL`.
 - **No SSO** — Cognito user pool, not Identity Center. Each user has a separate password. For a 20-person team this is fine; for growth, federate to Microsoft Entra ID / Google Workspace via Cognito's identity providers.
+- **Role-gate Phase 2 not done** — the SPA shows a "Read-only access" banner for viewers but doesn't yet hide individual write buttons. Viewer writes 403 from the backend and the error surfaces inline. Full UI gating is deferred.
 - **JIRA sync is one-way** — changes in the dashboard don't propagate back to JIRA. Intentional today but worth flagging.
 - **No automated tests run on deploy** — `pytest` exists but isn't enforced in CI. Adding GitHub Actions to run `pytest` and `npm run build` on every push to main would catch regressions before deploy.
+- **Closed since v1:** silent-refresh on 401 (id-token issuance via refresh token), the SPA's React ErrorBoundary, role gate Phase 1, plus most of the daily-use UI ergonomics (Critical page split, Software Catalog squash, Patching redesign, Functionally Latest override, Primary Basket field, etc).
 
 ### 11.3 Process
 
-- **No CI/CD** — deploys are run manually from a developer's machine. A GitHub Actions workflow assuming the `cdk-amsdash01-deploy-role-…` via OIDC would let `git push` to main trigger a deploy.
+- **No CI/CD** — deploys are run manually from a developer's machine via `./infra/scripts/deploy.sh --yes`. A GitHub Actions workflow assuming the `cdk-amsdash01-deploy-role-…` via OIDC would let `git push` to main trigger a deploy.
 - **No staging environment** — only `prod`. Adding a `staging` stack (same code, smaller sizing, separate Cognito user pool) would let changes bake before they hit the team. With `create_vpc=true` and Tier 1 sizing this would cost ~$50/mo.
 - **No structured release tags** — the runbook references `git checkout v1.0.0` but no version tags exist yet.
-- **Inadvertent credential exposure in chat** during development (Aurora password, an IAM access key — both since deleted/rotated for the access key, pending for Aurora). Treat the existing Aurora master credential as compromised and rotate it before broader rollout.
+- **Inadvertent credential exposure in chat during initial deploy work** — the Aurora master credential and an IAM access key were both visible at one point. The IAM access key was rotated; the Aurora credential rotation is still pending. Deletion protection now blocks the worst-case scenario, but the credential itself should still be rotated before broader use.
 
 ### 11.4 Documentation
 
-- `DEPLOY.md` predates today's changes (NAT-less default, public_alb, login flow). It should be refreshed with the current default flags + post-deploy steps.
 - `db/schema.sql` is described as "machine-generated reference of the live Postgres schema" — there's no automation today to keep it in sync. Add a `make schema-dump` target or a post-migrate signal.
+- `DEPLOY.md` was lightly refreshed (deploy wrapper noted) but its "first deploy" sections still reflect the original bootstrap path. Anyone running a *fresh* deploy from scratch should expect to consult both `DEPLOY.md` and the `infra/scripts/admin-bootstrap-*.sh` scripts.
 
 ---
 
