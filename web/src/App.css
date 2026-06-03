@@ -605,6 +605,20 @@
   font-size: 13px;
 }
 
+/* Persistent read-only role banner — sits at the top of every page when
+   the user lacks the 'admin' Cognito group. Amber so it's noticed but
+   not alarming. */
+.readonly-banner {
+  margin-bottom: 1rem;
+  padding: 8px 12px;
+  background: #fef3c7;
+  border: 0.5px solid #fde68a;
+  border-radius: var(--radius-md);
+  color: #92400e;
+  font-size: 13px;
+  cursor: help;
+}
+
 /* ── Auth pages (Login + NewPassword) ── */
 .auth-page {
   min-height: 100vh;

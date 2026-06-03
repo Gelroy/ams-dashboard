@@ -23,7 +23,7 @@ from rest_framework.decorators import (
     authentication_classes,
     permission_classes,
 )
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -231,3 +231,28 @@ def refresh(request: Request) -> Response:
     # but no RefreshToken — _tokens_payload handles that with its conditional
     # spread, so the SPA receives just {id_token, access_token, ...}.
     return Response(_tokens_payload(resp["AuthenticationResult"]))
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def me(request: Request) -> Response:
+    """GET → who am I and what can I do?
+
+    Returns the minimal identity + role view that the SPA needs to render
+    correctly. is_admin drives whether the read-only banner shows and (in
+    a later phase) whether write controls are visible.
+
+    The endpoint is intentionally separate from /login: login establishes
+    a token; this is what the SPA polls on every fresh boot to know who
+    holds it. Bypasses the default IsAdminOrReadOnly because viewers also
+    need to call it to discover that they're viewers.
+    """
+    user = request.user
+    return Response(
+        {
+            "username": getattr(user, "username", None),
+            "email": getattr(user, "email", None),
+            "groups": list(getattr(user, "groups", [])),
+            "is_admin": bool(getattr(user, "is_admin", False)),
+        }
+    )

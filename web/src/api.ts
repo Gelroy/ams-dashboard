@@ -115,6 +115,20 @@ export async function respondToNewPassword(
   })
 }
 
+// In-app role gate — the SPA renders a "read-only" banner when is_admin is
+// false. Write controls still attempt their PATCH/POST/DELETE; the backend
+// is the source of truth and returns 403 for non-admins.
+export interface MeResponse {
+  username: string | null
+  email: string | null
+  groups: string[]
+  is_admin: boolean
+}
+
+export function getMe(): Promise<MeResponse> {
+  return request<MeResponse>('/me/')
+}
+
 export interface ListOrganizationsParams {
   q?: string
   ams_level?: string

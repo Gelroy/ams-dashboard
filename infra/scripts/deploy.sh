@@ -91,4 +91,11 @@ fi
 set -o pipefail
 LOG="/tmp/cdk-deploy-$(date +%Y%m%d-%H%M%S).log"
 echo "  Log:     $LOG"
-cdk deploy "$STACK" "${CONTEXT_FLAGS[@]}" "${AUTO_APPROVE[@]}" "${EXTRA[@]}" 2>&1 | tee "$LOG"
+# macOS ships bash 3.2 which treats empty arrays as unset under `set -u`.
+# The `${name[@]+"${name[@]}"}` dance expands to nothing when the array is
+# empty and to the array's contents (preserving quoting) otherwise.
+cdk deploy "$STACK" \
+  "${CONTEXT_FLAGS[@]}" \
+  ${AUTO_APPROVE[@]+"${AUTO_APPROVE[@]}"} \
+  ${EXTRA[@]+"${EXTRA[@]}"} \
+  2>&1 | tee "$LOG"

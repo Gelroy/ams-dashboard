@@ -349,6 +349,21 @@ class AmsDashboardStack(cdk.Stack):
             generate_secret=False,
         )
 
+        # In-app role gate. Members of this group get write access in the
+        # Django API; everyone else is an implicit "viewer" (read-only). To
+        # promote a teammate, after deploy:
+        #   aws cognito-idp admin-add-user-to-group \
+        #       --user-pool-id <UserPoolId> \
+        #       --username <email> --group-name admin
+        cognito.CfnUserPoolGroup(
+            self,
+            "AdminGroup",
+            user_pool_id=user_pool.user_pool_id,
+            group_name="admin",
+            description="Full read/write access to the AMS Dashboard.",
+            precedence=1,
+        )
+
         # ── Container image (CDK builds + pushes to ECR) ───────────────
         image_asset = ecr_assets.DockerImageAsset(
             self,
