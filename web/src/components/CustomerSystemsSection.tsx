@@ -710,7 +710,7 @@ function AddInstalledForm({
         <option value="">— Software —</option>
         {available.map((s) => (
           <option key={s.id} value={s.id}>
-            {s.name} {s.version}
+            {s.name} ({s.version})
           </option>
         ))}
       </select>

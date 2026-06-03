@@ -1337,7 +1337,7 @@ function SoftwarePicker({
               onClick={() => toggle(s.id)}
             >
               {on ? '✓ ' : ''}
-              {s.name} {s.version}
+              {s.name} ({s.version})
             </button>
           )
         })}

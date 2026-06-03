@@ -83,7 +83,7 @@ export function CustomerDetailPage() {
       <CollapsibleSection title="Customer Systems">
         <CustomerSystemsSection orgId={id} />
       </CollapsibleSection>
-      <CollapsibleSection title="Users">
+      <CollapsibleSection title="Users" defaultOpen={false}>
         <UsersSection orgId={id} users={users} onUsersChanged={setUsers} />
       </CollapsibleSection>
       <CollapsibleSection title="Analytics">
@@ -156,6 +156,10 @@ function DetailsSection({
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<number | null>(null)
+  // Primary basket auto-saves on dropdown change (separate from the
+  // batched Save Changes flow); track its own error so a basket-save
+  // failure doesn't pollute the global form's saveError.
+  const [basketError, setBasketError] = useState<string | null>(null)
 
   const set = <K extends keyof EditableOrgFields>(key: K, value: EditableOrgFields[K]) =>
     setDraft((d) => ({ ...d, [key]: value }))
@@ -197,40 +201,9 @@ function DetailsSection({
             ))}
           </select>
         </Field>
-        <Field label="Zabbix">
-          <label
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 0' }}
-          >
-            <input
-              type="checkbox"
-              checked={!!draft.not_using_zabbix}
-              onChange={(e) => set('not_using_zabbix', e.target.checked)}
-            />
-            Not Using Zabbix
-          </label>
-        </Field>
-        <Field label="Country">
-          <select
-            className="input"
-            value={draft.country ?? ''}
-            onChange={(e) => set('country', (e.target.value as Country) || null)}
-          >
-            <option value="">— Not set —</option>
-            {COUNTRIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Help Desk #">
-          <input
-            className="input"
-            value={draft.help_desk_phone ?? ''}
-            placeholder="5551234567"
-            onChange={(e) => set('help_desk_phone', e.target.value || null)}
-          />
-        </Field>
+        {/* Zabbix / Country / Help Desk # moved to the bottom of the form
+            so the most edit-frequent strategic fields (Roadmap, Notes,
+            Primary Basket) sit higher in reading order. */}
         <Field label="Documents" wide>
           <DocumentsField org={org} onChanged={onUpdated} />
         </Field>
@@ -262,12 +235,21 @@ function DetailsSection({
           <PrimaryBasketField
             value={draft.primary_basket}
             baskets={baskets}
-            // primary_basket_softwares is server-derived from the FK, so
-            // we render it straight from the org's current snapshot. Stale
-            // until Save → refetch updates it; that's a known small lag,
-            // not worth a separate fetch.
+            // Server-derived snapshot from the FK; refreshes immediately
+            // because the dropdown auto-PATCHes (below).
             softwares={org.primary_basket_softwares}
-            onChange={(v) => set('primary_basket', v)}
+            error={basketError}
+            onChange={(v) => {
+              // Update local draft so the select stays controlled, then
+              // PATCH right away so the chip list refreshes without
+              // needing the global Save button. Other unsaved fields in
+              // `draft` are left untouched — we send only primary_basket.
+              set('primary_basket', v)
+              setBasketError(null)
+              updateOrganization(org.id, { primary_basket: v })
+                .then(onUpdated)
+                .catch((e: Error) => setBasketError(e.message))
+            }}
           />
         </Field>
         <ExpandableField
@@ -298,6 +280,45 @@ function DetailsSection({
           <span className="meta">
             {org.jira_synced_at ? new Date(org.jira_synced_at).toLocaleString() : '—'}
           </span>
+        </Field>
+        {/* Contact / geo / monitoring opt-out — kept at the bottom of the
+            form so the daily-edit strategic fields rise to the top. The
+            2-column grid puts Help Desk # in column 1 and Country in
+            column 2 on the same row; Not Using Zabbix occupies the next
+            row by itself, sitting just above the Save button. */}
+        <Field label="Help Desk #">
+          <input
+            className="input"
+            value={draft.help_desk_phone ?? ''}
+            placeholder="5551234567"
+            onChange={(e) => set('help_desk_phone', e.target.value || null)}
+          />
+        </Field>
+        <Field label="Country">
+          <select
+            className="input"
+            value={draft.country ?? ''}
+            onChange={(e) => set('country', (e.target.value as Country) || null)}
+          >
+            <option value="">— Not set —</option>
+            {COUNTRIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Zabbix">
+          <label
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 0' }}
+          >
+            <input
+              type="checkbox"
+              checked={!!draft.not_using_zabbix}
+              onChange={(e) => set('not_using_zabbix', e.target.checked)}
+            />
+            Not Using Zabbix
+          </label>
         </Field>
       </div>
       <div className="form-actions">
@@ -918,11 +939,13 @@ function PrimaryBasketField({
   value,
   baskets,
   softwares,
+  error,
   onChange,
 }: {
   value: string | null | undefined
   baskets: Basket[]
   softwares: Organization['primary_basket_softwares']
+  error: string | null
   onChange: (next: string | null) => void
 }) {
   return (
@@ -939,6 +962,7 @@ function PrimaryBasketField({
           </option>
         ))}
       </select>
+      {error && <div className="error-text" style={{ marginTop: 6 }}>{error}</div>}
       {value && softwares.length === 0 && (
         <div className="meta" style={{ marginTop: 6 }}>
           This basket has no software pinned yet.
@@ -948,7 +972,7 @@ function PrimaryBasketField({
         <div className="env-chips" style={{ marginTop: 6 }}>
           {softwares.map((s) => (
             <span key={s.id} className="env-chip" title={`Status: ${s.status}`}>
-              {s.name} {s.version}
+              {s.name} ({s.version})
             </span>
           ))}
         </div>

@@ -267,7 +267,7 @@ function AddBasketSoftwareForm({
         <option value="">— Software —</option>
         {available.map((s) => (
           <option key={s.id} value={s.id}>
-            {s.name} {s.version} ({s.status})
+            {s.name} ({s.version}) — {s.status}
           </option>
         ))}
       </select>
