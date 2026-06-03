@@ -71,6 +71,15 @@ def drop_all_executions(apps, schema_editor):
 
 class Migration(migrations.Migration):
 
+    # atomic=False because we mix DELETE of patch_executions rows (cascades
+    # to its FK-referencing children) with ALTER TABLE patch_executions
+    # within the same migration. Postgres refuses to ALTER a table with
+    # pending FK trigger events from earlier in the same transaction —
+    # "cannot ALTER TABLE ... because it has pending trigger events". Each
+    # operation gets its own short transaction here, so the DELETE settles
+    # before the ALTER runs.
+    atomic = False
+
     dependencies = [
         ("patching", "0003_patchexecution_planned_date"),
         ("software", "0004_squash_versions_phase3"),
