@@ -349,9 +349,14 @@ class AmsDashboardStack(cdk.Stack):
             generate_secret=False,
         )
 
-        # In-app role gate. Members of this group get write access in the
-        # Django API; everyone else is an implicit "viewer" (read-only). To
-        # promote a teammate, after deploy:
+        # In-app role gate.
+        #   - admin  → full read/write. The AMS team lives here.
+        #   - viewer → explicit read-only. Behavior matches "no group" today
+        #              (the permission class only checks for 'admin'); the
+        #              group exists so read-only stakeholders have a named,
+        #              auditable role in the Cognito console instead of
+        #              relying on "unassigned == read-only by default."
+        # To promote a teammate, after deploy:
         #   aws cognito-idp admin-add-user-to-group \
         #       --user-pool-id <UserPoolId> \
         #       --username <email> --group-name admin
@@ -362,6 +367,17 @@ class AmsDashboardStack(cdk.Stack):
             group_name="admin",
             description="Full read/write access to the AMS Dashboard.",
             precedence=1,
+        )
+        cognito.CfnUserPoolGroup(
+            self,
+            "ViewerGroup",
+            user_pool_id=user_pool.user_pool_id,
+            group_name="viewer",
+            description=(
+                "Read-only access. Intended for stakeholders who can browse "
+                "the dashboard but not edit data."
+            ),
+            precedence=10,
         )
 
         # ── Container image (CDK builds + pushes to ECR) ───────────────
