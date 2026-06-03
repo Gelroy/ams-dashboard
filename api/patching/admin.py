@@ -8,7 +8,7 @@ from .models import (
     PatchGroupStep,
     PatchHistory,
     PatchPlan,
-    PatchPlanGroup,
+    PatchPlanStep,
 )
 
 
@@ -16,33 +16,36 @@ from .models import (
 class PatchGroupAdmin(admin.ModelAdmin):
     list_display = ("name",)
     search_fields = ("name",)
+    filter_horizontal = ("softwares",)
 
 
 @admin.register(PatchGroupStep)
 class PatchGroupStepAdmin(admin.ModelAdmin):
-    list_display = ("patch_group", "step_num", "description", "est_time", "per_server")
+    list_display = ("patch_group", "step_num", "description", "est_time", "per_server", "not_timed")
 
 
 @admin.register(PatchPlan)
 class PatchPlanAdmin(admin.ModelAdmin):
-    list_display = ("name", "basket")
+    list_display = ("name",)
     search_fields = ("name",)
+    filter_horizontal = ("softwares",)
 
 
-@admin.register(PatchPlanGroup)
-class PatchPlanGroupAdmin(admin.ModelAdmin):
-    list_display = ("patch_plan", "patch_group", "position")
+@admin.register(PatchPlanStep)
+class PatchPlanStepAdmin(admin.ModelAdmin):
+    list_display = ("patch_plan", "step_num", "description", "est_time", "per_server", "not_timed")
 
 
 @admin.register(PatchExecution)
 class PatchExecutionAdmin(admin.ModelAdmin):
-    list_display = ("organization", "environment", "basket", "status", "patch_date", "started_at", "completed_at")
+    list_display = ("organization", "environment", "patch_plan", "status", "patch_date", "started_at", "completed_at")
     list_filter = ("status",)
+    filter_horizontal = ("softwares",)
 
 
 @admin.register(PatchExecutionStep)
 class PatchExecutionStepAdmin(admin.ModelAdmin):
-    list_display = ("patch_execution", "step_num", "description", "done", "total_time")
+    list_display = ("patch_execution", "step_num", "description", "done", "total_time", "not_timed")
 
 
 @admin.register(PatchExecutionAbort)

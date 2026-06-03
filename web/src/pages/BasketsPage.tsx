@@ -8,7 +8,6 @@ import {
   listSoftware,
   removeBasketSoftware,
   updateBasket,
-  updateBasketSoftware,
 } from '../api'
 import type { Basket, BasketSoftwareEntry, Software } from '../types'
 
@@ -146,7 +145,6 @@ function BasketCard({
 function BasketSoftwareRow({
   basketId,
   entry,
-  catalog,
   onChanged,
 }: {
   basketId: string
@@ -154,26 +152,17 @@ function BasketSoftwareRow({
   catalog: Software[]
   onChanged: () => void
 }) {
-  const sw = catalog.find((s) => s.id === entry.software)
-  const versionOptions = sw?.versions ?? []
+  // After the SoftwareVersion squash a basket pin is just (basket, software)
+  // — no version dropdown to edit. We surface the Software's intrinsic
+  // version + status next to the name so the user can still see what
+  // they're targeting. To change versions, remove + re-add at the new
+  // Software row.
   return (
     <div className="release-row">
       <strong style={{ width: 180 }}>{entry.software_name}</strong>
-      <select
-        className="input compact"
-        value={entry.software_version}
-        onChange={(e) =>
-          updateBasketSoftware(basketId, entry.software, {
-            software_version: e.target.value,
-          }).then(onChanged)
-        }
-      >
-        {versionOptions.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.version} ({v.status})
-          </option>
-        ))}
-      </select>
+      <span className="badge" title={`Status: ${entry.version_status}`}>
+        {entry.version_label} ({entry.version_status})
+      </span>
       <span className="meta" style={{ flex: 1 }}>
         Latest:{' '}
         {entry.latest_release_name ? (
@@ -248,23 +237,18 @@ function AddBasketSoftwareForm({
 }) {
   const available = catalog.filter((s) => !existing.includes(s.id))
   const [softwareId, setSoftwareId] = useState('')
-  const [versionId, setVersionId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const sw = available.find((s) => s.id === softwareId)
-  const versions = sw?.versions ?? []
 
   if (available.length === 0) return null
 
   const submit = async () => {
-    if (!softwareId || !versionId) return
+    if (!softwareId) return
     setBusy(true)
     setError(null)
     try {
-      await addBasketSoftware(basketId, { software: softwareId, software_version: versionId })
+      await addBasketSoftware(basketId, { software: softwareId })
       setSoftwareId('')
-      setVersionId('')
       onAdded()
     } catch (e) {
       setError((e as Error).message)
@@ -278,32 +262,16 @@ function AddBasketSoftwareForm({
       <select
         className="input compact"
         value={softwareId}
-        onChange={(e) => {
-          setSoftwareId(e.target.value)
-          setVersionId('')
-        }}
+        onChange={(e) => setSoftwareId(e.target.value)}
       >
         <option value="">— Software —</option>
         {available.map((s) => (
           <option key={s.id} value={s.id}>
-            {s.name}
+            {s.name} ({s.version}) — {s.status}
           </option>
         ))}
       </select>
-      <select
-        className="input compact"
-        value={versionId}
-        disabled={!softwareId}
-        onChange={(e) => setVersionId(e.target.value)}
-      >
-        <option value="">— Version —</option>
-        {versions.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.version} ({v.status})
-          </option>
-        ))}
-      </select>
-      <button className="btn" disabled={busy || !softwareId || !versionId} onClick={submit}>
+      <button className="btn" disabled={busy || !softwareId} onClick={submit}>
         + Add
       </button>
       {error && <span className="error-text">{error}</span>}

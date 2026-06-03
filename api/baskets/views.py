@@ -1,6 +1,6 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-from rest_framework import viewsets
+from rest_framework import status, viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -14,16 +14,19 @@ from .serializers import (
     ServerBasketsSerializer,
     ServerInstalledSoftwareSerializer,
 )
+from .services import copy_installed_software
 
 
 class BasketViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
-    queryset = Basket.objects.prefetch_related("software_entries__software_version__releases").all()
+    queryset = Basket.objects.prefetch_related("software_entries__software__releases").all()
     serializer_class = BasketSerializer
     pagination_class = None
 
 
 class BasketSoftwareViewSet(viewsets.ModelViewSet):
-    """Per-basket software pins. POST creates, PATCH updates the version, DELETE removes."""
+    """Per-basket software pins. POST creates, DELETE removes. No PATCH —
+    after the SoftwareVersion squash, a basket entry is simply (basket,
+    software) and there is no longer a version dropdown to edit."""
 
     serializer_class = BasketSoftwareSerializer
     pagination_class = None
@@ -31,7 +34,7 @@ class BasketSoftwareViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return BasketSoftware.objects.filter(basket_id=self.kwargs["basket_pk"]).select_related(
-            "software", "software_version"
+            "software"
         )
 
     def perform_create(self, serializer):
@@ -83,9 +86,42 @@ class ServerInstalledSoftwareViewSet(viewsets.ModelViewSet):
                 server_id=self.kwargs["server_pk"],
                 server__environment__organization_id=self.kwargs["organization_pk"],
             )
-            .select_related("software", "software_version", "software_release")
+            .select_related("software", "software_release")
             .order_by("software__name")
         )
 
     def perform_create(self, serializer):
         serializer.save(server_id=self.kwargs["server_pk"])
+
+    def copy_from(self, request, organization_pk=None, server_pk=None):
+        """POST {source_server_id} — copy every ServerInstalledSoftware row
+        from the source server to this server. Source must belong to the
+        same organization. Returns the destination's refreshed list."""
+        source_id = request.data.get("source_server_id")
+        if not source_id:
+            return Response(
+                {"detail": "source_server_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if str(source_id) == str(server_pk):
+            return Response(
+                {"detail": "Source and destination must be different servers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Both source + dest must belong to this org (rejects cross-org abuse
+        # and confirms the IDs are valid).
+        get_object_or_404(
+            Server,
+            pk=server_pk,
+            environment__organization_id=organization_pk,
+            deleted_at__isnull=True,
+        )
+        get_object_or_404(
+            Server,
+            pk=source_id,
+            environment__organization_id=organization_pk,
+            deleted_at__isnull=True,
+        )
+        copy_installed_software(source_id, server_pk)
+        qs = self.get_queryset()
+        return Response(self.get_serializer(qs, many=True).data)

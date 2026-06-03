@@ -22,7 +22,7 @@ Information needed from your platform / security teams before first deploy:
 
 | Item | Where it goes |
 |---|---|
-| VPC ID (the shared internal VPC) | `cdk deploy -c vpc_id=vpc-…` |
+| VPC ID (the shared internal VPC) | `cdk deploy -c vpc_id=vpc-…` (or `-c create_vpc=true` to have the stack provision a new VPC — see below) |
 | AWS account number | `cdk deploy -c account=…` (or `CDK_DEFAULT_ACCOUNT`) |
 | AWS region | `cdk deploy -c region=…` (or `CDK_DEFAULT_REGION`) |
 | ACM certificate ARN (optional for first deploy) | `cdk deploy -c acm_cert_arn=arn:aws:acm:…` |
@@ -30,6 +30,41 @@ Information needed from your platform / security teams before first deploy:
 | Environment label (`prod`, `staging`, …) | `cdk deploy -c environment=prod` (default: `prod`) |
 | Company-specific tags (CostCenter, Owner, etc.) | `cdk deploy -c tags='{"CostCenter":"4321","Owner":"AMS-IT"}'` |
 | Private subnet IDs (when VPC subnets aren't CDK-tagged) | `cdk deploy -c private_subnet_ids=subnet-a,subnet-b -c availability_zones=us-west-2a,us-west-2b` |
+
+### Deploying into a fresh sub account (no existing VPC)
+
+When the target account is empty — e.g. a new sub account your AWS admin
+spun up for this project — there's no shared VPC to consume. Pass
+`-c create_vpc=true` and the stack will provision a new VPC alongside
+everything else:
+
+```bash
+cdk deploy \
+  -c account=<ACCOUNT> \
+  -c region=<REGION> \
+  -c create_vpc=true
+```
+
+The created VPC has:
+- 2 AZs (`max_azs=2`)
+- Public subnets in each AZ
+- Private-with-egress subnets in each AZ (where Aurora + the internal ALB live)
+- **No NAT gateway by default** — Fargate tasks run in the public subnets
+  with `assign_public_ip=True`. They can reach ECR / Atlassian / Cognito via
+  the IGW, but the task security group still blocks all inbound except from
+  the ALB SG. Saves ~$33/mo vs a NAT-based topology.
+
+To add NAT instead (e.g. policy forbids public IPs on workloads), pass
+`-c nat_gateways=1` (~$33/mo) or `-c nat_gateways=2` for HA across both
+AZs (~$66/mo). Tasks then move to the private subnets and don't get
+public IPs.
+
+Do not combine `-c create_vpc=true` with `-c vpc_id=…` — they're mutually
+exclusive.
+
+`cdk destroy` will tear the VPC down along with the rest of the stack
+(the Aurora cluster's final snapshot and the Cognito user pool are
+retained per their removal policies).
 
 ### When you hit "There are no private subnet groups in this VPC"
 
@@ -331,10 +366,14 @@ aws secretsmanager put-secret-value \
 
 The Django schema must be applied before the API can talk to the DB.
 
+Match the subnet type and `assignPublicIp` to the deployed topology:
+- **Default (`create_vpc=true`, no NAT):** Public subnets, `assignPublicIp=ENABLED`
+- **NAT path (`-c nat_gateways>=1`, or existing-VPC with NAT):** Private subnets, `assignPublicIp=DISABLED`
+
 ```bash
-# Get a subnet ID (private subnet) and the API service's security group ID:
+# Default no-NAT topology (substitute Private/DISABLED if you set nat_gateways>0):
 SUBNET=$(aws ec2 describe-subnets \
-  --filters "Name=vpc-id,Values=vpc-XXXXXXXX" "Name=tag:aws-cdk:subnet-type,Values=Private" \
+  --filters "Name=vpc-id,Values=vpc-XXXXXXXX" "Name=tag:aws-cdk:subnet-type,Values=Public" \
   --query 'Subnets[0].SubnetId' --output text)
 SG=$(aws ecs describe-services --cluster <ClusterName> \
   --services <ApiServiceName> \
@@ -345,7 +384,7 @@ aws ecs run-task \
   --cluster <ClusterName> \
   --task-definition <MigrationTaskArn> \
   --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET],securityGroups=[$SG],assignPublicIp=DISABLED}"
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET],securityGroups=[$SG],assignPublicIp=ENABLED}"
 ```
 
 Watch progress in CloudWatch Logs at `/ams-dashboard/api` (stream prefix
@@ -385,38 +424,75 @@ and after login you should see the Customers panel.
 
 ## Subsequent deploys
 
-For code changes, the admin just re-runs:
+The day-to-day path is the wrapper script in `infra/scripts/deploy.sh`:
 
 ```bash
-cd ams-dashboard/infra
-source .venv/bin/activate
-cdk deploy -c account=<ACCOUNT> -c region=<REGION> -c vpc_id=vpc-XXXXXXXX
+./infra/scripts/deploy.sh --yes
 ```
+
+It activates the CDK venv, silences the jsii Node-version banner, bakes in
+the three context flags the running stack needs (`create_vpc=true`,
+`public_alb=true`, `allow_public_http=true`), turns on `pipefail` so a Docker
+build failure actually fails the deploy, and tees output to
+`/tmp/cdk-deploy-<timestamp>.log`. When HTTPS lands, export `ACM_CERT_ARN=…`
+before running the script — the wrapper swaps `allow_public_http=true` for
+`acm_cert_arn=…` automatically.
 
 CDK rebuilds the image, pushes a new tag to ECR, and updates the Fargate
 service with a rolling deploy. The circuit breaker rolls back automatically
 if the new tasks fail their health checks.
 
-**Run migrations again** after each deploy that includes new Django
-migrations (any `*_initial.py` or numbered migration file under
-`api/<app>/migrations/`). Same `aws ecs run-task` command as step 2 above.
+**Run migrations** after each deploy that includes new Django migrations
+(any new file under `api/<app>/migrations/`). The migration task definition
+ARN is in the deploy output as `MigrationTaskArn`:
+
+```bash
+CLUSTER=AmsDashboardStack-ClusterEB0386A7-D1161Vswl3Iu
+SUBNET1=subnet-0cf412c5862a49750
+SUBNET2=subnet-02f5abcec1a1096fd
+SG=sg-031f0db248aab5873
+
+AWS_PROFILE=ams-admin AWS_REGION=us-west-2 aws ecs run-task \
+  --cluster $CLUSTER \
+  --task-definition AmsDashboardStackMigrationTaskA104F64B \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1,$SUBNET2],securityGroups=[$SG],assignPublicIp=ENABLED}"
+```
+
+The CFN output's task-def ARN includes a revision suffix (`:N`) but
+omitting it picks the latest, which is what you want.
+
+## Don't forget the context flags
+
+CDK is declarative — every deploy re-asserts the entire stack from
+context + code. **Dropping `public_alb=true` flips the ALB back to
+internal scheme** and changes its DNS, locking everyone out until
+reversed. This is exactly what `deploy.sh` exists to prevent; only
+bypass it if you know what you're doing.
 
 ## Operations
 
 | Need | Where |
 |---|---|
-| API logs | CloudWatch Logs → `/ams-dashboard/api` |
+| API logs | CloudWatch Logs → `/ams-dashboard/api` (currently gunicorn access logs only — Django logger output gap is tracked in ARCHITECTURE §11.1) |
 | JIRA sync logs | CloudWatch Logs → `/ams-dashboard/jira-sync` |
 | Database metrics | RDS console → cluster `Db` |
-| Active Fargate tasks | ECS console → cluster `<ClusterName>` |
-| Trigger a manual JIRA sync | `aws ecs run-task` against `JiraSyncOrgs/Users/Tickets` task definitions (see ECS console for ARNs) |
+| Active Fargate tasks | ECS console → cluster `AmsDashboardStack-ClusterEB0386A7-…` |
+| Trigger a manual JIRA sync | `aws ecs run-task` against `JiraSyncOrgs/Users/Tickets` task definitions |
+| Add a teammate to admin role | `aws cognito-idp admin-add-user-to-group --user-pool-id us-west-2_Bao82CnNc --username <email> --group-name admin` (member must log out + back in for it to take effect) |
+| Manual Aurora snapshot | `aws rds create-db-cluster-snapshot --db-cluster-identifier amsdashboardstack-db5d02a0a9-smiqefm0qfai --db-cluster-snapshot-identifier <name>` |
 
 ## Tearing it down
 
+Aurora `deletion_protection` is now ON. To tear down the cluster you must
+first disable it via a CDK change (`deletion_protection=False` in
+`infra_stack.py`) and deploy that, then run:
+
 ```bash
-cdk destroy -c account=<ACCOUNT> -c region=<REGION> -c vpc_id=vpc-XXXXXXXX
+cdk destroy -c account=<ACCOUNT> -c region=<REGION> -c create_vpc=true
 ```
 
 The Aurora cluster has `removalPolicy: SNAPSHOT` so a final snapshot will
 be taken; the Cognito user pool has `RETAIN` and must be manually deleted
-if no longer needed.
+if no longer needed. The manual recovery snapshots (`ams-manual-*`) persist
+until explicitly deleted.

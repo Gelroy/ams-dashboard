@@ -12,21 +12,52 @@ import type {
   ServerInstalledSoftwareEntry,
   Software,
   SoftwareRelease,
-  SoftwareVersion,
   SoftwareVersionStatus,
 } from './types'
 
+import { clearTokenAndRedirectToLogin, getToken, tryRefresh } from './auth'
+
 const API_BASE = '/api'
 
+// Paths exempt from the silent-refresh / 401-redirect dance: the auth flow
+// endpoints themselves. A 401 from /auth/login means "bad credentials" and
+// should surface to the caller, not redirect to a page they're already on.
+const AUTH_PATHS = new Set(['/auth/login', '/auth/challenge', '/auth/refresh'])
+
+function buildHeaders(init: RequestInit | undefined, token: string | null): HeadersInit {
+  return {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(init?.headers ?? {}),
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${API_BASE}${path}`, {
+  let r = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers: buildHeaders(init, getToken()),
   })
+
+  // Silent refresh: on a 401 to a non-auth endpoint, try minting a new
+  // id_token from the refresh_token and retry the original call. If the
+  // refresh succeeds the user never sees an interruption; if it fails (no
+  // refresh token, Cognito rejected it, etc.) we fall through to the
+  // login bounce.
+  if (r.status === 401 && !AUTH_PATHS.has(path)) {
+    const newToken = await tryRefresh()
+    if (newToken) {
+      r = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        headers: buildHeaders(init, newToken),
+      })
+    }
+    if (r.status === 401) {
+      clearTokenAndRedirectToLogin()
+      throw new Error('Unauthorized')
+    }
+  }
+
   if (!r.ok) {
     let detail = ''
     try {
@@ -36,12 +67,72 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(`HTTP ${r.status} ${r.statusText}${detail}`)
   }
+  // 204 No Content (typical for DELETE) has no JSON body; calling r.json()
+  // would throw "Unexpected end of JSON input". Return undefined so callers
+  // that type T as void get something sensible.
+  if (r.status === 204) {
+    return undefined as T
+  }
   return r.json() as Promise<T>
+}
+
+// ── Auth endpoints — exposed for the LoginPage / NewPasswordPage. ─────
+export interface LoginSuccess {
+  id_token: string
+  access_token: string
+  refresh_token?: string
+  expires_in?: number
+  token_type?: string
+}
+
+export interface NewPasswordChallenge {
+  challenge: 'NEW_PASSWORD_REQUIRED'
+  session: string
+  username: string
+}
+
+export type LoginResponse = LoginSuccess | NewPasswordChallenge
+
+export function isNewPasswordChallenge(r: LoginResponse): r is NewPasswordChallenge {
+  return (r as NewPasswordChallenge).challenge === 'NEW_PASSWORD_REQUIRED'
+}
+
+export async function login(username: string, password: string): Promise<LoginResponse> {
+  return request<LoginResponse>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+}
+
+export async function respondToNewPassword(
+  session: string,
+  username: string,
+  newPassword: string,
+): Promise<LoginSuccess> {
+  return request<LoginSuccess>('/auth/challenge', {
+    method: 'POST',
+    body: JSON.stringify({ session, username, new_password: newPassword }),
+  })
+}
+
+// In-app role gate — the SPA renders a "read-only" banner when is_admin is
+// false. Write controls still attempt their PATCH/POST/DELETE; the backend
+// is the source of truth and returns 403 for non-admins.
+export interface MeResponse {
+  username: string | null
+  email: string | null
+  groups: string[]
+  is_admin: boolean
+}
+
+export function getMe(): Promise<MeResponse> {
+  return request<MeResponse>('/me/')
 }
 
 export interface ListOrganizationsParams {
   q?: string
   ams_level?: string
+  has_ams_level?: boolean
   limit?: number
   offset?: number
 }
@@ -52,6 +143,7 @@ export function listOrganizations(
   const qs = new URLSearchParams()
   if (params.q) qs.set('q', params.q)
   if (params.ams_level) qs.set('ams_level', params.ams_level)
+  if (params.has_ams_level) qs.set('has_ams_level', 'true')
   if (params.limit != null) qs.set('limit', String(params.limit))
   if (params.offset != null) qs.set('offset', String(params.offset))
   const tail = qs.toString() ? `?${qs.toString()}` : ''
@@ -99,11 +191,7 @@ export function updateOrgDocument(
 }
 
 export function deleteOrgDocument(orgId: string, documentId: string): Promise<void> {
-  return fetch(`/api/organizations/${orgId}/documents/${documentId}/`, {
-    method: 'DELETE',
-  }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/organizations/${orgId}/documents/${documentId}/`, { method: 'DELETE' })
 }
 
 export function updateOrgUser(
@@ -130,11 +218,7 @@ export function createEnvironment(orgId: string, name: string, position: number)
 }
 
 export function deleteEnvironment(orgId: string, envId: string): Promise<void> {
-  return fetch(`/api/organizations/${orgId}/environments/${envId}/`, { method: 'DELETE' }).then(
-    (r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-    },
-  )
+  return request<void>(`/organizations/${orgId}/environments/${envId}/`, { method: 'DELETE' })
 }
 
 export function listServers(orgId: string): Promise<Server[]> {
@@ -163,10 +247,16 @@ export function updateServer(
 }
 
 export function deleteServer(orgId: string, serverId: string): Promise<void> {
-  return fetch(`/api/organizations/${orgId}/servers/${serverId}/`, { method: 'DELETE' }).then(
-    (r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-    },
+  return request<void>(`/organizations/${orgId}/servers/${serverId}/`, { method: 'DELETE' })
+}
+
+export function copyServerToEnvPeers(
+  orgId: string,
+  serverId: string,
+): Promise<{ updated: number }> {
+  return request<{ updated: number }>(
+    `/organizations/${orgId}/servers/${serverId}/copy-to-env/`,
+    { method: 'POST' },
   )
 }
 
@@ -175,16 +265,21 @@ export function listSoftware(): Promise<Software[]> {
   return request<Software[]>(`/software/`)
 }
 
-export function createSoftware(name: string): Promise<Software> {
+export function createSoftware(payload: {
+  name: string
+  version: string
+  status?: SoftwareVersionStatus
+  description?: string | null
+}): Promise<Software> {
   return request<Software>(`/software/`, {
     method: 'POST',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(payload),
   })
 }
 
 export function updateSoftware(
   id: string,
-  patch: Partial<Pick<Software, 'name' | 'description'>>,
+  patch: Partial<Pick<Software, 'name' | 'version' | 'status' | 'description'>>,
 ): Promise<Software> {
   return request<Software>(`/software/${id}/`, {
     method: 'PATCH',
@@ -193,43 +288,12 @@ export function updateSoftware(
 }
 
 export function deleteSoftware(id: string): Promise<void> {
-  return fetch(`/api/software/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/software/${id}/`, { method: 'DELETE' })
 }
 
-export function createVersion(
-  softwareId: string,
-  payload: { version: string; status: SoftwareVersionStatus; position: number },
-): Promise<SoftwareVersion> {
-  return request<SoftwareVersion>(`/software/${softwareId}/versions/`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-export function updateVersion(
-  softwareId: string,
-  versionId: string,
-  patch: Partial<Pick<SoftwareVersion, 'version' | 'status' | 'position'>>,
-): Promise<SoftwareVersion> {
-  return request<SoftwareVersion>(`/software/${softwareId}/versions/${versionId}/`, {
-    method: 'PATCH',
-    body: JSON.stringify(patch),
-  })
-}
-
-export function deleteVersion(softwareId: string, versionId: string): Promise<void> {
-  return fetch(`/api/software/${softwareId}/versions/${versionId}/`, { method: 'DELETE' }).then(
-    (r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-    },
-  )
-}
-
+// Releases are direct children of Software now — no more /versions/ segment.
 export function createRelease(
   softwareId: string,
-  versionId: string,
   payload: {
     release_name: string
     released_on?: string | null
@@ -238,34 +302,24 @@ export function createRelease(
   },
 ): Promise<SoftwareRelease> {
   return request<SoftwareRelease>(
-    `/software/${softwareId}/versions/${versionId}/releases/`,
+    `/software/${softwareId}/releases/`,
     { method: 'POST', body: JSON.stringify(payload) },
   )
 }
 
 export function updateRelease(
   softwareId: string,
-  versionId: string,
   releaseId: string,
   patch: Partial<Pick<SoftwareRelease, 'release_name' | 'released_on' | 'status' | 'position'>>,
 ): Promise<SoftwareRelease> {
   return request<SoftwareRelease>(
-    `/software/${softwareId}/versions/${versionId}/releases/${releaseId}/`,
+    `/software/${softwareId}/releases/${releaseId}/`,
     { method: 'PATCH', body: JSON.stringify(patch) },
   )
 }
 
-export function deleteRelease(
-  softwareId: string,
-  versionId: string,
-  releaseId: string,
-): Promise<void> {
-  return fetch(
-    `/api/software/${softwareId}/versions/${versionId}/releases/${releaseId}/`,
-    { method: 'DELETE' },
-  ).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+export function deleteRelease(softwareId: string, releaseId: string): Promise<void> {
+  return request<void>(`/software/${softwareId}/releases/${releaseId}/`, { method: 'DELETE' })
 }
 
 // Baskets
@@ -291,14 +345,12 @@ export function updateBasket(
 }
 
 export function deleteBasket(id: string): Promise<void> {
-  return fetch(`/api/baskets/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/baskets/${id}/`, { method: 'DELETE' })
 }
 
 export function addBasketSoftware(
   basketId: string,
-  payload: { software: string; software_version: string },
+  payload: { software: string },
 ): Promise<unknown> {
   return request(`/baskets/${basketId}/software/`, {
     method: 'POST',
@@ -306,23 +358,12 @@ export function addBasketSoftware(
   })
 }
 
-export function updateBasketSoftware(
-  basketId: string,
-  softwareId: string,
-  patch: { software_version: string },
-): Promise<unknown> {
-  return request(`/baskets/${basketId}/software/${softwareId}/`, {
-    method: 'PATCH',
-    body: JSON.stringify(patch),
-  })
-}
+// No updateBasketSoftware after the SoftwareVersion squash — a basket pin
+// is now just (basket, software) with no version dropdown to edit. To change
+// the version, swap the pinned Software (DELETE + POST).
 
 export function removeBasketSoftware(basketId: string, softwareId: string): Promise<void> {
-  return fetch(`/api/baskets/${basketId}/software/${softwareId}/`, { method: 'DELETE' }).then(
-    (r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-    },
-  )
+  return request<void>(`/baskets/${basketId}/software/${softwareId}/`, { method: 'DELETE' })
 }
 
 // Per-server basket assignment
@@ -356,7 +397,7 @@ export function listInstalledSoftware(
 export function addInstalledSoftware(
   orgId: string,
   serverId: string,
-  payload: { software: string; software_version: string; software_release?: string | null },
+  payload: { software: string; software_release?: string | null },
 ): Promise<ServerInstalledSoftwareEntry> {
   return request<ServerInstalledSoftwareEntry>(
     `/organizations/${orgId}/servers/${serverId}/installed/`,
@@ -368,7 +409,7 @@ export function updateInstalledSoftware(
   orgId: string,
   serverId: string,
   id: string,
-  patch: { software_version?: string; software_release?: string | null },
+  patch: { software_release?: string | null; functionally_latest?: boolean },
 ): Promise<ServerInstalledSoftwareEntry> {
   return request<ServerInstalledSoftwareEntry>(
     `/organizations/${orgId}/servers/${serverId}/installed/${id}/`,
@@ -381,11 +422,18 @@ export function removeInstalledSoftware(
   serverId: string,
   id: string,
 ): Promise<void> {
-  return fetch(`/api/organizations/${orgId}/servers/${serverId}/installed/${id}/`, {
-    method: 'DELETE',
-  }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/organizations/${orgId}/servers/${serverId}/installed/${id}/`, { method: 'DELETE' })
+}
+
+export function copyInstalledSoftwareFrom(
+  orgId: string,
+  destServerId: string,
+  sourceServerId: string,
+): Promise<ServerInstalledSoftwareEntry[]> {
+  return request<ServerInstalledSoftwareEntry[]>(
+    `/organizations/${orgId}/servers/${destServerId}/installed/copy-from/`,
+    { method: 'POST', body: JSON.stringify({ source_server_id: sourceServerId }) },
+  )
 }
 
 // Patch Groups
@@ -402,7 +450,7 @@ export function createPatchGroup(name: string): Promise<import('./types').PatchG
 
 export function updatePatchGroup(
   id: string,
-  patch: { name?: string },
+  patch: { name?: string; software_ids?: string[] },
 ): Promise<import('./types').PatchGroup> {
   return request(`/patch-groups/${id}/`, {
     method: 'PATCH',
@@ -411,14 +459,18 @@ export function updatePatchGroup(
 }
 
 export function deletePatchGroup(id: string): Promise<void> {
-  return fetch(`/api/patch-groups/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/patch-groups/${id}/`, { method: 'DELETE' })
 }
 
 export function createPatchGroupStep(
   groupId: string,
-  payload: { step_num: number; description: string; est_time?: string | null; per_server?: boolean },
+  payload: {
+    step_num: number
+    description: string
+    est_time?: string | null
+    per_server?: boolean
+    not_timed?: boolean
+  },
 ): Promise<import('./types').PatchGroupStep> {
   return request(`/patch-groups/${groupId}/steps/`, {
     method: 'POST',
@@ -429,7 +481,12 @@ export function createPatchGroupStep(
 export function updatePatchGroupStep(
   groupId: string,
   stepId: string,
-  patch: Partial<Pick<import('./types').PatchGroupStep, 'description' | 'est_time' | 'per_server' | 'step_num'>>,
+  patch: Partial<
+    Pick<
+      import('./types').PatchGroupStep,
+      'description' | 'est_time' | 'per_server' | 'step_num' | 'not_timed'
+    >
+  >,
 ): Promise<import('./types').PatchGroupStep> {
   return request(`/patch-groups/${groupId}/steps/${stepId}/`, {
     method: 'PATCH',
@@ -438,9 +495,7 @@ export function updatePatchGroupStep(
 }
 
 export function deletePatchGroupStep(groupId: string, stepId: string): Promise<void> {
-  return fetch(`/api/patch-groups/${groupId}/steps/${stepId}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/patch-groups/${groupId}/steps/${stepId}/`, { method: 'DELETE' })
 }
 
 // Patch Plans
@@ -457,7 +512,7 @@ export function createPatchPlan(name: string): Promise<import('./types').PatchPl
 
 export function updatePatchPlan(
   id: string,
-  patch: { name?: string; basket?: string | null },
+  patch: { name?: string; software_ids?: string[] },
 ): Promise<import('./types').PatchPlan> {
   return request(`/patch-plans/${id}/`, {
     method: 'PATCH',
@@ -466,25 +521,57 @@ export function updatePatchPlan(
 }
 
 export function deletePatchPlan(id: string): Promise<void> {
-  return fetch(`/api/patch-plans/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+  return request<void>(`/patch-plans/${id}/`, { method: 'DELETE' })
+}
+
+// One-shot import: copies the group's steps onto the end of the plan's
+// step list and unions the group's softwares into the plan's software list.
+// The group is forgotten by the plan after this call (no persistent link).
+export function importGroupIntoPlan(
+  planId: string,
+  groupId: string,
+): Promise<import('./types').PatchPlan> {
+  return request(`/patch-plans/${planId}/import-group/`, {
+    method: 'POST',
+    body: JSON.stringify({ patch_group: groupId }),
   })
 }
 
-export function addPatchPlanGroup(
+// Plan-owned step CRUD. Replaces the old "add/remove group" flow.
+export function createPatchPlanStep(
   planId: string,
-  payload: { patch_group: string; position: number },
-): Promise<unknown> {
-  return request(`/patch-plans/${planId}/groups/`, {
+  payload: {
+    step_num: number
+    description: string
+    est_time?: string | null
+    per_server?: boolean
+    not_timed?: boolean
+  },
+): Promise<import('./types').PatchPlanStep> {
+  return request(`/patch-plans/${planId}/steps/`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
 }
 
-export function removePatchPlanGroup(planId: string, groupId: string): Promise<void> {
-  return fetch(`/api/patch-plans/${planId}/groups/${groupId}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
+export function updatePatchPlanStep(
+  planId: string,
+  stepId: string,
+  patch: Partial<
+    Pick<
+      import('./types').PatchPlanStep,
+      'description' | 'est_time' | 'per_server' | 'step_num' | 'not_timed'
+    >
+  >,
+): Promise<import('./types').PatchPlanStep> {
+  return request(`/patch-plans/${planId}/steps/${stepId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
   })
+}
+
+export function deletePatchPlanStep(planId: string, stepId: string): Promise<void> {
+  return request<void>(`/patch-plans/${planId}/steps/${stepId}/`, { method: 'DELETE' })
 }
 
 // Patch Executions
@@ -498,12 +585,31 @@ export function listPatchExecutions(
 export function createPatchExecution(payload: {
   organization: string
   environment: string
-  basket: string
   patch_plan?: string | null
+  planned_date?: string | null
 }): Promise<import('./types').PatchExecution> {
   return request(`/patch-executions/`, {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+// Manual trigger — walks AMS-contracted customers, finds stale
+// (server, software) pairs, and creates Executions per (env, plan).
+// Returns a result list the SPA renders as a summary banner.
+export function checkForNeededExecutions(): Promise<{
+  results: import('./types').PatchExecutionCheckResult[]
+}> {
+  return request(`/patch-executions/check/`, { method: 'POST' })
+}
+
+export function updatePatchExecution(
+  id: string,
+  patch: { planned_date?: string | null },
+): Promise<import('./types').PatchExecution> {
+  return request(`/patch-executions/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
   })
 }
 
@@ -521,6 +627,27 @@ export function abortPatchExecution(
   return request(`/patch-executions/${executionId}/abort/`, {
     method: 'POST',
     body: JSON.stringify({ notes }),
+  })
+}
+
+export function resetPatchExecution(
+  executionId: string,
+): Promise<import('./types').PatchExecution> {
+  return request(`/patch-executions/${executionId}/reset/`, { method: 'POST' })
+}
+
+export function deletePatchExecution(executionId: string): Promise<void> {
+  return request<void>(`/patch-executions/${executionId}/`, { method: 'DELETE' })
+}
+
+export function setStepElapsed(
+  executionId: string,
+  stepId: string,
+  totalTime: string | null,
+): Promise<import('./types').PatchExecution> {
+  return request(`/patch-executions/${executionId}/steps/${stepId}/elapsed/`, {
+    method: 'PATCH',
+    body: JSON.stringify({ total_time: totalTime }),
   })
 }
 
@@ -567,9 +694,7 @@ export function updateAnalyticDefinition(
 }
 
 export function deleteAnalyticDefinition(id: string): Promise<void> {
-  return fetch(`/api/analytic-definitions/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/analytic-definitions/${id}/`, { method: 'DELETE' })
 }
 
 export function listCustomerAnalytics(
@@ -591,9 +716,7 @@ export function createCustomerAnalytic(payload: {
 }
 
 export function deleteCustomerAnalytic(id: string): Promise<void> {
-  return fetch(`/api/customer-analytics/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/customer-analytics/${id}/`, { method: 'DELETE' })
 }
 
 export function recordAnalyticHistory(
@@ -610,11 +733,7 @@ export function deleteAnalyticHistory(
   customerAnalyticId: string,
   historyId: string,
 ): Promise<void> {
-  return fetch(`/api/customer-analytics/${customerAnalyticId}/history/${historyId}/`, {
-    method: 'DELETE',
-  }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/customer-analytics/${customerAnalyticId}/history/${historyId}/`, { method: 'DELETE' })
 }
 
 // Staff
@@ -638,9 +757,7 @@ export function updateStaff(
 }
 
 export function deleteStaff(id: string): Promise<void> {
-  return fetch(`/api/staff/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/staff/${id}/`, { method: 'DELETE' })
 }
 
 export function setStaffSmeOrganizations(
@@ -691,9 +808,7 @@ export function updateActivity(
 }
 
 export function deleteActivity(id: string): Promise<void> {
-  return fetch(`/api/activities/${id}/`, { method: 'DELETE' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`)
-  })
+  return request<void>(`/activities/${id}/`, { method: 'DELETE' })
 }
 
 export function completeActivity(id: string): Promise<import('./types').Activity> {

@@ -19,13 +19,14 @@ if not account or not region:
         "CDK_DEFAULT_ACCOUNT/REGION resolve, or pass -c account=… -c region=…"
     )
 
-# Only synthesize the application stack when vpc_id is provided. `cdk bootstrap`
-# loads this file but doesn't need our stack — bootstrap manages the separate
-# CDKToolkit stack. Synthesizing AmsDashboardStack without a real VPC would
-# either error out (no vpc_id) or trigger a Vpc.from_lookup against bogus
-# input. Skipping it here lets `cdk bootstrap` run cleanly.
+# Only synthesize the application stack when the caller has chosen a VPC
+# strategy — either consume an existing VPC (`-c vpc_id=…`) or have the stack
+# create a new one (`-c create_vpc=true`). `cdk bootstrap` loads this file but
+# doesn't need our stack; skipping synthesis when neither flag is set lets
+# bootstrap run cleanly without spurious lookups or errors.
 vpc_id = app.node.try_get_context("vpc_id")
-if vpc_id:
+create_vpc = str(app.node.try_get_context("create_vpc") or "").lower() == "true"
+if vpc_id or create_vpc:
     AmsDashboardStack(
         app,
         "AmsDashboardStack",
@@ -33,9 +34,11 @@ if vpc_id:
     )
 else:
     print(
-        "Note: vpc_id context not set — skipping AmsDashboardStack synthesis. "
-        "This is fine for 'cdk bootstrap'. For 'cdk deploy' / 'cdk synth' / "
-        "'cdk diff', pass -c vpc_id=vpc-xxxxxxxx.",
+        "Note: neither vpc_id nor create_vpc context is set — skipping "
+        "AmsDashboardStack synthesis. This is fine for 'cdk bootstrap'. For "
+        "'cdk deploy' / 'cdk synth' / 'cdk diff', either pass "
+        "-c vpc_id=vpc-xxxxxxxx (existing VPC) or -c create_vpc=true "
+        "(have the stack provision one).",
         file=sys.stderr,
     )
 

@@ -42,12 +42,15 @@ COPY api/ ./
 COPY --from=web-builder /web/dist ./web_build
 
 # Collect static files (Django admin + SPA) into STATIC_ROOT.
-# Use throwaway env values so settings load without real secrets.
-ENV SECRET_KEY=build-time-throwaway \
+# Use throwaway env values inline so they exist only during this RUN —
+# previously these were ENV directives, which persisted into the runtime
+# image and made DATABASE_URL=postgres://x:x@localhost/x override the real
+# DB_HOST injected by ECS (Django settings prefer DATABASE_URL when set).
+RUN SECRET_KEY=build-time-throwaway \
     DATABASE_URL=postgres://x:x@localhost/x \
     DEBUG=False \
-    AUTH_BYPASS=1
-RUN python manage.py collectstatic --noinput
+    AUTH_BYPASS=1 \
+    python manage.py collectstatic --noinput
 
 # Drop privileges
 RUN groupadd --system app && useradd --system --gid app app \

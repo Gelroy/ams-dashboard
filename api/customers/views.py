@@ -1,10 +1,12 @@
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, Value, When
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django_filters import rest_framework as filters
 from rest_framework import mixins, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
-from .models import Environment, Organization, OrgDocument, OrgUser, Server
+from .models import AmsLevel, Environment, Organization, OrgDocument, OrgUser, Server
 from .serializers import (
     EnvironmentSerializer,
     OrganizationSerializer,
@@ -24,6 +26,10 @@ class SoftDeleteDestroyMixin:
 
 class OrganizationFilter(filters.FilterSet):
     q = filters.CharFilter(method="filter_q", help_text="Substring match on name (case-insensitive)")
+    has_ams_level = filters.BooleanFilter(
+        method="filter_has_ams_level",
+        help_text="When true, only return orgs with an AMS level assigned.",
+    )
 
     class Meta:
         model = Organization
@@ -31,6 +37,14 @@ class OrganizationFilter(filters.FilterSet):
 
     def filter_q(self, queryset, name, value):
         return queryset.filter(Q(jira_name__icontains=value) | Q(local_name__icontains=value))
+
+    def filter_has_ams_level(self, queryset, name, value):
+        # Only act when the param is explicitly true — false/absent both mean
+        # "no filter", so /api/organizations/?has_ams_level=false returns
+        # everything (same as omitting the param).
+        if value:
+            return queryset.filter(ams_level__isnull=False)
+        return queryset
 
 
 class OrganizationViewSet(
@@ -45,7 +59,25 @@ class OrganizationViewSet(
     filterset_class = OrganizationFilter
 
     def get_queryset(self):
-        return Organization.objects.all().order_by(Coalesce("local_name", "jira_name"))
+        # Static sort: Expert customers first, then Enhanced, then Essential,
+        # then any orgs without a level set (will only appear when the SPA's
+        # "Hide customers without AMS level" checkbox is unticked). Within
+        # each tier, alphabetical by display name.
+        ams_priority = Case(
+            When(ams_level=AmsLevel.EXPERT, then=Value(0)),
+            When(ams_level=AmsLevel.ENHANCED, then=Value(1)),
+            When(ams_level=AmsLevel.ESSENTIAL, then=Value(2)),
+            default=Value(3),
+            output_field=IntegerField(),
+        )
+        return (
+            Organization.objects.all()
+            .annotate(_ams_priority=ams_priority)
+            # Prefetched so OrganizationSerializer.get_cert_status can walk
+            # env→server without hitting N+1.
+            .prefetch_related("environments__servers")
+            .order_by("_ams_priority", Coalesce("local_name", "jira_name"))
+        )
 
 
 class OrgUserViewSet(
@@ -106,3 +138,17 @@ class ServerViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
             **super().get_serializer_context(),
             "organization_pk": self.kwargs.get("organization_pk"),
         }
+
+    @action(detail=True, methods=["post"], url_path="copy-to-env")
+    def copy_to_env(self, request, organization_pk=None, pk=None):
+        """Replace every env-peer's notes, basket assignments, and installed
+        software with this server's. Returns {"updated": <peer count>}.
+
+        Server-identity fields (name, ip_address, cert_expires_on) are NOT
+        copied — those are intrinsic to each server.
+        """
+        from baskets.services import copy_server_details_to_env_peers
+
+        source = self.get_object()
+        count = copy_server_details_to_env_peers(source)
+        return Response({"updated": count})

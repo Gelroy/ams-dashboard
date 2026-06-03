@@ -17,7 +17,9 @@ const sections: NavSection[] = [
     label: 'Data',
     items: [
       { to: '/customers', label: 'Customers' },
-      { to: '/versions', label: 'Versions' },
+      // Route path stays /versions so existing bookmarks survive — only
+      // the visible label changes after the SoftwareVersion squash.
+      { to: '/versions', label: 'Software' },
       { to: '/baskets', label: 'Baskets' },
     ],
   },

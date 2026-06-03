@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 
 import {
   addInstalledSoftware,
+  copyInstalledSoftwareFrom,
+  copyServerToEnvPeers,
   createEnvironment,
   createServer,
   deleteEnvironment,
@@ -97,9 +99,21 @@ export function CustomerSystemsSection({ orgId }: Props) {
       {envs.length > 0 && (
         <AddServerForm
           envs={envs}
-          onAdd={async (envId, name) => {
+          existingServers={servers}
+          onAdd={async (envId, name, copyFromServerId) => {
             const created = await createServer(orgId, { environment: envId, name })
-            setServers([...servers, created])
+            if (copyFromServerId) {
+              try {
+                await copyInstalledSoftwareFrom(orgId, created.id, copyFromServerId)
+              } catch (e) {
+                // Surface but don't block — the server is created; the user
+                // can populate installed software manually if the copy failed.
+                console.error('copy-from failed:', e)
+              }
+            }
+            // Refetch the full tree so the new server's installed_software
+            // (and the copy's effects) are reflected accurately.
+            refresh()
           }}
         />
       )}
@@ -223,8 +237,15 @@ function ServerTable({
         <thead>
           <tr>
             <th style={{ width: 24 }}></th>
-            <th>Server</th>
+            {/* Fixed width on Server pushes the IP column right next to
+                it instead of letting the auto-layout stretch Server to
+                fill leftover space. Baskets gets the flex room instead. */}
+            <th style={{ width: 200 }}>Server</th>
+            {/* IP address — header intentionally empty; the masked input
+                ###.###.###.### is self-evident. */}
+            <th style={{ width: 140 }}></th>
             <th style={{ width: 90 }}>Env</th>
+            <th>Baskets</th>
             <th style={{ width: 140 }}>Cert Expires</th>
             <th style={{ width: 130 }}>Patching</th>
             <th style={{ width: 50 }}></th>
@@ -273,6 +294,7 @@ function ServerRow({
   onChanged: () => void
 }) {
   const [name, setName] = useState(server.name)
+  const [ip, setIp] = useState(server.ip_address ?? '')
 
   return (
     <>
@@ -285,6 +307,7 @@ function ServerRow({
         <td>
           <input
             className="input compact"
+            style={{ width: '100%' }}
             value={name}
             onChange={(e) => setName(e.target.value)}
             onBlur={() => {
@@ -293,7 +316,38 @@ function ServerRow({
           />
         </td>
         <td>
+          <input
+            className="input compact"
+            style={{ width: '100%' }}
+            value={ip}
+            placeholder="___.___.___.___"
+            inputMode="numeric"
+            // 15 = max valid IPv4 length (e.g. "255.255.255.255")
+            maxLength={15}
+            onChange={(e) => setIp(maskIpv4(e.target.value))}
+            onBlur={() => {
+              const next = ip.trim() || null
+              const current = server.ip_address ?? null
+              if (next === current) return
+              // Don't PATCH a half-typed value that the backend would
+              // reject — clear input or valid IPv4 only.
+              if (next !== null && !isValidIpv4(next)) {
+                // Roll the input back so the user sees they need to finish.
+                setIp(server.ip_address ?? '')
+                return
+              }
+              onPatch(server.id, { ip_address: next })
+            }}
+            title="IPv4 address — leave blank if not recorded"
+          />
+        </td>
+        <td>
           <span className="badge">{server.environment_name}</span>
+        </td>
+        <td className="meta" style={{ fontSize: 11 }}>
+          {server.baskets.length === 0
+            ? '—'
+            : server.baskets.map((b) => b.name).join(', ')}
         </td>
         <td>
           <input
@@ -314,7 +368,7 @@ function ServerRow({
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={6} className="server-detail-cell">
+          <td colSpan={8} className="server-detail-cell">
             <ServerDetailPanel
               server={server}
               baskets={baskets}
@@ -344,6 +398,7 @@ function ServerDetailPanel({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [copyBusy, setCopyBusy] = useState(false)
   const assignedIds = new Set(server.baskets.map((b) => b.id))
 
   const toggleBasket = async (basketId: string) => {
@@ -362,8 +417,44 @@ function ServerDetailPanel({
     }
   }
 
+  const copyToEnv = async () => {
+    if (
+      !window.confirm(
+        'Do you want to copy all the details from this server to every other server in this environment?',
+      )
+    ) {
+      return
+    }
+    setCopyBusy(true)
+    setError(null)
+    try {
+      const { updated } = await copyServerToEnvPeers(orgId, server.id)
+      if (updated === 0) {
+        window.alert('No other servers in this environment to copy to.')
+      }
+      onChanged()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setCopyBusy(false)
+    }
+  }
+
   return (
     <div className="server-detail">
+      <div
+        className="panel-header-row"
+        style={{ marginBottom: 8, justifyContent: 'flex-end' }}
+      >
+        <button
+          className="btn"
+          disabled={copyBusy}
+          onClick={copyToEnv}
+          title="Replace every other server in this environment's notes, baskets, and installed software with this server's"
+        >
+          {copyBusy ? 'Copying…' : 'Copy to Environment'}
+        </button>
+      </div>
       <div className="sub-section">
         <div className="field-label">Assigned Baskets</div>
         <div className="env-chips">
@@ -451,37 +542,66 @@ function InstalledRow({
   catalog: Software[]
   onChanged: () => void
 }) {
+  // Optimistic copies of the two editable fields (release, functionally_latest).
+  // The controlled inputs render from these immediately on change so the user
+  // sees their pick stick instead of snapping back during the PATCH round-trip.
+  // The optimistic value is overwritten when `entry` arrives fresh from the
+  // parent's refresh (useEffects below). On PATCH failure we surface the
+  // error and roll back.
+  const [pendingRelease, setPendingRelease] = useState<string | null>(
+    entry.software_release ?? null,
+  )
+  const [pendingFnLatest, setPendingFnLatest] = useState(entry.functionally_latest)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setPendingRelease(entry.software_release ?? null)
+  }, [entry.software_release])
+  useEffect(() => {
+    setPendingFnLatest(entry.functionally_latest)
+  }, [entry.functionally_latest])
+
+  // After the SoftwareVersion squash, a Software row IS a specific version,
+  // so its releases hang off the Software directly. The previous version
+  // dropdown has nothing left to choose between.
   const sw = catalog.find((s) => s.id === entry.software)
-  const versions = sw?.versions ?? []
-  const releases = versions.find((v) => v.id === entry.software_version)?.releases ?? []
+  const releases = sw?.releases ?? []
+
+  const patch = (
+    body: { software_release?: string | null; functionally_latest?: boolean },
+    optimistic: () => void,
+    rollback: () => void,
+  ) => {
+    optimistic()
+    setSaving(true)
+    setError(null)
+    updateInstalledSoftware(orgId, serverId, entry.id, body)
+      .then(() => onChanged())
+      .catch((e: Error) => {
+        rollback()
+        setError(e.message)
+      })
+      .finally(() => setSaving(false))
+  }
 
   return (
-    <div className="release-row">
+    <div className="release-row" style={{ flexWrap: 'wrap' }}>
       <strong style={{ width: 180 }}>{entry.software_name}</strong>
+      <span className="meta" style={{ width: 80 }}>{entry.version_label}</span>
       <select
         className="input compact"
-        value={entry.software_version}
-        onChange={(e) =>
-          updateInstalledSoftware(orgId, serverId, entry.id, {
-            software_version: e.target.value,
-            software_release: null,
-          }).then(onChanged)
-        }
-      >
-        {versions.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.version}
-          </option>
-        ))}
-      </select>
-      <select
-        className="input compact"
-        value={entry.software_release ?? ''}
-        onChange={(e) =>
-          updateInstalledSoftware(orgId, serverId, entry.id, {
-            software_release: e.target.value || null,
-          }).then(onChanged)
-        }
+        value={pendingRelease ?? ''}
+        disabled={saving}
+        onChange={(e) => {
+          const newReleaseId = e.target.value || null
+          const prevRelease = pendingRelease
+          patch(
+            { software_release: newReleaseId },
+            () => setPendingRelease(newReleaseId),
+            () => setPendingRelease(prevRelease),
+          )
+        }}
       >
         <option value="">— release —</option>
         {releases.map((r) => (
@@ -490,15 +610,48 @@ function InstalledRow({
           </option>
         ))}
       </select>
+      {/* Functionally Latest — per-server override for interim fixes that
+          don't apply (e.g. UNIX-only release on a Windows customer). When
+          checked, this server is treated as up-to-date for Needs Patching
+          and skipped by the auto-PatchExecution-on-new-Latest signal. */}
+      <label
+        className="filter-checkbox"
+        title="Treat the currently installed release as Latest for this server (overrides the catalog). Use when an interim release doesn't apply to this customer."
+      >
+        <input
+          type="checkbox"
+          checked={pendingFnLatest}
+          disabled={saving}
+          onChange={(e) => {
+            const newVal = e.target.checked
+            const prev = pendingFnLatest
+            patch(
+              { functionally_latest: newVal },
+              () => setPendingFnLatest(newVal),
+              () => setPendingFnLatest(prev),
+            )
+          }}
+        />
+        Functionally Latest
+      </label>
       <button
         className="btn-icon"
+        disabled={saving}
         onClick={() => {
           if (window.confirm(`Remove ${entry.software_name}?`))
-            removeInstalledSoftware(orgId, serverId, entry.id).then(onChanged)
+            removeInstalledSoftware(orgId, serverId, entry.id)
+              .then(onChanged)
+              .catch((e: Error) => setError(e.message))
         }}
       >
         ×
       </button>
+      {saving && <span className="meta">saving…</span>}
+      {error && (
+        <span className="error-banner" style={{ flexBasis: '100%', marginTop: '0.25rem' }}>
+          {error}
+        </span>
+      )}
     </div>
   )
 }
@@ -518,27 +671,25 @@ function AddInstalledForm({
 }) {
   const available = catalog.filter((s) => !existing.includes(s.id))
   const [softwareId, setSoftwareId] = useState('')
-  const [versionId, setVersionId] = useState('')
   const [releaseId, setReleaseId] = useState('')
   const [busy, setBusy] = useState(false)
 
+  // After the squash, picking a Software fully determines the version, so
+  // we go straight from Software → Release. One fewer dropdown.
   const sw = available.find((s) => s.id === softwareId)
-  const versions = sw?.versions ?? []
-  const releases = versions.find((v) => v.id === versionId)?.releases ?? []
+  const releases = sw?.releases ?? []
 
   if (available.length === 0) return null
 
   const submit = async () => {
-    if (!softwareId || !versionId) return
+    if (!softwareId) return
     setBusy(true)
     try {
       await addInstalledSoftware(orgId, serverId, {
         software: softwareId,
-        software_version: versionId,
         software_release: releaseId || null,
       })
       setSoftwareId('')
-      setVersionId('')
       setReleaseId('')
       onAdded()
     } finally {
@@ -553,37 +704,20 @@ function AddInstalledForm({
         value={softwareId}
         onChange={(e) => {
           setSoftwareId(e.target.value)
-          setVersionId('')
           setReleaseId('')
         }}
       >
         <option value="">— Software —</option>
         {available.map((s) => (
           <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </select>
-      <select
-        className="input compact"
-        value={versionId}
-        disabled={!softwareId}
-        onChange={(e) => {
-          setVersionId(e.target.value)
-          setReleaseId('')
-        }}
-      >
-        <option value="">— Version —</option>
-        {versions.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.version}
+            {s.name} ({s.version})
           </option>
         ))}
       </select>
       <select
         className="input compact"
         value={releaseId}
-        disabled={!versionId}
+        disabled={!softwareId}
         onChange={(e) => setReleaseId(e.target.value)}
       >
         <option value="">— Release —</option>
@@ -593,7 +727,7 @@ function AddInstalledForm({
           </option>
         ))}
       </select>
-      <button className="btn" disabled={busy || !softwareId || !versionId} onClick={submit}>
+      <button className="btn" disabled={busy || !softwareId} onClick={submit}>
         + Record
       </button>
     </div>
@@ -602,23 +736,42 @@ function AddInstalledForm({
 
 function AddServerForm({
   envs,
+  existingServers,
   onAdd,
 }: {
   envs: Environment[]
-  onAdd: (envId: string, name: string) => Promise<void>
+  existingServers: Server[]
+  onAdd: (envId: string, name: string, copyFromServerId?: string) => Promise<void>
 }) {
   const [envId, setEnvId] = useState(envs[0]?.id ?? '')
   const [name, setName] = useState('')
+  const [includeExisting, setIncludeExisting] = useState(false)
+  const [sourceServerId, setSourceServerId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Build label "ENV / server" so the user can disambiguate two servers
+  // with the same name in different envs.
+  const envNameById = new Map(envs.map((e) => [e.id, e.name]))
+  const sortedSources = [...existingServers].sort((a, b) => {
+    const ea = envNameById.get(a.environment) ?? ''
+    const eb = envNameById.get(b.environment) ?? ''
+    return ea === eb ? a.name.localeCompare(b.name) : ea.localeCompare(eb)
+  })
+
   const submit = async () => {
     if (!envId || !name.trim()) return
+    if (includeExisting && !sourceServerId) {
+      setError('Pick a source server to copy from.')
+      return
+    }
     setBusy(true)
     setError(null)
     try {
-      await onAdd(envId, name.trim())
+      await onAdd(envId, name.trim(), includeExisting ? sourceServerId : undefined)
       setName('')
+      setIncludeExisting(false)
+      setSourceServerId('')
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -627,27 +780,58 @@ function AddServerForm({
   }
 
   return (
-    <div className="add-row">
-      <select className="input compact" value={envId} onChange={(e) => setEnvId(e.target.value)}>
-        {envs.map((e) => (
-          <option key={e.id} value={e.id}>
-            {e.name}
-          </option>
-        ))}
-      </select>
-      <input
-        className="input compact"
-        placeholder="New server name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') submit()
-        }}
-      />
-      <button className="btn" disabled={busy || !name.trim()} onClick={submit}>
-        + Add Server
-      </button>
-      {error && <span className="error-text">{error}</span>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div className="add-row">
+        <select className="input compact" value={envId} onChange={(e) => setEnvId(e.target.value)}>
+          {envs.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.name}
+            </option>
+          ))}
+        </select>
+        <input
+          className="input compact"
+          placeholder="New server name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+        />
+        <button className="btn" disabled={busy || !name.trim()} onClick={submit}>
+          + Add Server
+        </button>
+        {error && <span className="error-text">{error}</span>}
+      </div>
+      {existingServers.length > 0 && (
+        <div className="add-row">
+          <label className="filter-checkbox">
+            <input
+              type="checkbox"
+              checked={includeExisting}
+              onChange={(e) => {
+                setIncludeExisting(e.target.checked)
+                if (!e.target.checked) setSourceServerId('')
+              }}
+            />
+            Include existing software?
+          </label>
+          {includeExisting && (
+            <select
+              className="input compact"
+              value={sourceServerId}
+              onChange={(e) => setSourceServerId(e.target.value)}
+            >
+              <option value="">— copy from… —</option>
+              {sortedSources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {(envNameById.get(s.environment) ?? '?')} / {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -656,4 +840,28 @@ function PatchingBadge({ status }: { status: NeedsPatchingStatus }) {
   if (status === 'yes') return <span className="badge patch-yes">Needs Patching</span>
   if (status === 'no') return <span className="badge patch-no">Up to Date</span>
   return <span className="meta">—</span>
+}
+
+/** Mask raw user input into IPv4 shape ###.###.###.### — per-segment we
+ *  keep only digits, cap at 3 chars each, and keep at most 4 segments. We
+ *  don't auto-insert dots; the user types them (or pastes a real IP), and
+ *  the function just sanitises whatever they typed. */
+function maskIpv4(raw: string): string {
+  return raw
+    .split('.')
+    .slice(0, 4)
+    .map((s) => s.replace(/\D/g, '').slice(0, 3))
+    .join('.')
+}
+
+/** Strict-ish IPv4 validator — four octets, each 0–255. Used on blur to
+ *  decide whether to PATCH or roll the input back. Empty string is handled
+ *  by the caller (treated as "clear the field"). */
+function isValidIpv4(s: string): boolean {
+  const m = s.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (!m) return false
+  return m.slice(1).every((part) => {
+    const n = parseInt(part, 10)
+    return n >= 0 && n <= 255
+  })
 }

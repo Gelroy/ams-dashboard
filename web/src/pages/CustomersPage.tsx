@@ -2,9 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { listOrganizations } from '../api'
-import type { AmsLevel, Organization } from '../types'
-
-const AMS_LEVELS: AmsLevel[] = ['Essential', 'Enhanced', 'Expert']
+import type { Organization } from '../types'
 
 export function CustomersPage() {
   const [items, setItems] = useState<Organization[]>([])
@@ -12,13 +10,19 @@ export function CustomersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [q, setQ] = useState('')
-  const [amsLevel, setAmsLevel] = useState<string>('')
+  // Default behavior: hide customers without an AMS level, since the AMS
+  // team only deals with contracted customers. Uncheck to see everyone
+  // (e.g. when triaging a newly-synced org that needs a level assigned).
+  const [hideUnassigned, setHideUnassigned] = useState(true)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    listOrganizations({ q: q || undefined, ams_level: amsLevel || undefined })
+    listOrganizations({
+      q: q || undefined,
+      has_ams_level: hideUnassigned ? true : undefined,
+    })
       .then((data) => {
         if (cancelled) return
         setItems(data.results)
@@ -35,7 +39,7 @@ export function CustomersPage() {
     return () => {
       cancelled = true
     }
-  }, [q, amsLevel])
+  }, [q, hideUnassigned])
 
   return (
     <div>
@@ -51,14 +55,14 @@ export function CustomersPage() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <select className="input" value={amsLevel} onChange={(e) => setAmsLevel(e.target.value)}>
-          <option value="">All AMS Levels</option>
-          {AMS_LEVELS.map((l) => (
-            <option key={l} value={l}>
-              {l}
-            </option>
-          ))}
-        </select>
+        <label className="filter-checkbox">
+          <input
+            type="checkbox"
+            checked={hideUnassigned}
+            onChange={(e) => setHideUnassigned(e.target.checked)}
+          />
+          Hide customers without AMS level
+        </label>
       </div>
 
       {error && <div className="error-banner">Error: {error}</div>}
@@ -69,23 +73,25 @@ export function CustomersPage() {
             <tr>
               <th>Name</th>
               <th>AMS Level</th>
+              <th>Automated</th>
+              <th>Manual</th>
               <th>Zabbix</th>
-              <th>Open Tickets</th>
               <th>Patching</th>
-              <th>Last JIRA Sync</th>
+              <th>Cert</th>
+              <th>Country</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={6} className="state-cell">
+                <td colSpan={8} className="state-cell">
                   Loading…
                 </td>
               </tr>
             )}
             {!loading && items.length === 0 && (
               <tr>
-                <td colSpan={6} className="state-cell">
+                <td colSpan={8} className="state-cell">
                   No customers found.
                 </td>
               </tr>
@@ -102,12 +108,12 @@ export function CustomersPage() {
                     )}
                   </td>
                   <td>{o.ams_level ? <Badge value={o.ams_level} /> : <span className="meta">—</span>}</td>
-                  <td>
-                    {o.zabbix_status ? <Badge value={o.zabbix_status} /> : <span className="meta">—</span>}
-                  </td>
-                  <td>{o.open_ticket_count ?? <span className="meta">—</span>}</td>
-                  <td><PatchingBadge status={o.needs_patching} /></td>
-                  <td className="meta">{formatDate(o.jira_synced_at)}</td>
+                  <td>{o.automated_ticket_count ?? <span className="meta">—</span>}</td>
+                  <td>{o.manual_ticket_count ?? <span className="meta">—</span>}</td>
+                  <td><ZabbixDot status={o.zabbix_status_rollup} /></td>
+                  <td><PatchDot status={o.patching_status} /></td>
+                  <td><CertDot status={o.cert_status} /></td>
+                  <td>{o.country ?? <span className="meta">—</span>}</td>
                 </tr>
               ))}
           </tbody>
@@ -121,14 +127,44 @@ function Badge({ value }: { value: string }) {
   return <span className={`badge badge-${value.toLowerCase()}`}>{value}</span>
 }
 
-function PatchingBadge({ status }: { status: 'yes' | 'no' | 'unknown' }) {
-  if (status === 'yes') return <span className="badge patch-yes">Needs Patching</span>
-  if (status === 'no') return <span className="badge patch-no">Up to Date</span>
-  return <span className="meta">—</span>
+function CertDot({ status }: { status: 'green' | 'yellow' | 'red' | 'unknown' }) {
+  if (status === 'unknown') return <span className="meta">—</span>
+  const title =
+    status === 'red'
+      ? 'One or more server certs are expired'
+      : status === 'yellow'
+        ? 'A server cert expires within 30 days'
+        : 'All server certs are at least 30 days out'
+  return <span className={`cert-dot cert-${status}`} title={title} aria-label={title}>●</span>
 }
 
-function formatDate(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return d.toLocaleString()
+function PatchDot({ status }: { status: 'green' | 'yellow' | 'red' | 'unknown' }) {
+  if (status === 'unknown') return <span className="meta">—</span>
+  const title =
+    status === 'red'
+      ? 'Every server needs patching'
+      : status === 'yellow'
+        ? 'Some servers need patching, others are up to date'
+        : 'No server needs patching'
+  return <span className={`cert-dot cert-${status}`} title={title} aria-label={title}>●</span>
+}
+
+function ZabbixDot({ status }: { status: 'green' | 'yellow' | 'red' | 'unknown' | 'na' }) {
+  if (status === 'unknown') return <span className="meta">—</span>
+  if (status === 'na') {
+    return (
+      <span className="meta" title="Customer is not using Zabbix" aria-label="Not using Zabbix">
+        N/A
+      </span>
+    )
+  }
+  // Until the live Zabbix integration is wired up, every org reports
+  // green. Tooltip wording mirrors cert/patch dots.
+  const title =
+    status === 'red'
+      ? 'Zabbix is reporting one or more critical issues'
+      : status === 'yellow'
+        ? 'Zabbix has warnings'
+        : 'All Zabbix metrics healthy'
+  return <span className={`cert-dot cert-${status}`} title={title} aria-label={title}>●</span>
 }

@@ -6,7 +6,7 @@ from .views import (
     PatchGroupStepViewSet,
     PatchGroupViewSet,
     PatchHistoryViewSet,
-    PatchPlanGroupViewSet,
+    PatchPlanStepViewSet,
     PatchPlanViewSet,
 )
 
@@ -19,7 +19,9 @@ router.register(r"patch-history", PatchHistoryViewSet, basename="patch-history")
 group_router = routers.NestedDefaultRouter(router, r"patch-groups", lookup="patch_group")
 group_router.register(r"steps", PatchGroupStepViewSet, basename="patch-group-steps")
 
+# Plan-owned steps live at /api/patch-plans/{plan_pk}/steps/ now, replacing
+# the old /api/patch-plans/{plan_pk}/groups/ route.
 plan_router = routers.NestedDefaultRouter(router, r"patch-plans", lookup="patch_plan")
-plan_router.register(r"groups", PatchPlanGroupViewSet, basename="patch-plan-groups")
+plan_router.register(r"steps", PatchPlanStepViewSet, basename="patch-plan-steps")
 
 urlpatterns = router.urls + group_router.urls + plan_router.urls

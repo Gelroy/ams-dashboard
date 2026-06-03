@@ -15,6 +15,10 @@ class OrganizationSerializer(serializers.ModelSerializer):
     documents = OrgDocumentSerializer(many=True, read_only=True)
     sme_staff = serializers.SerializerMethodField()
     needs_patching = serializers.SerializerMethodField()
+    patching_status = serializers.SerializerMethodField()
+    cert_status = serializers.SerializerMethodField()
+    zabbix_status_rollup = serializers.SerializerMethodField()
+    primary_basket_softwares = serializers.SerializerMethodField()
 
     class Meta:
         model = Organization
@@ -26,28 +30,64 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "display_name",
             "ams_level",
             "zabbix_status",
+            "not_using_zabbix",
+            "country",
             "help_desk_phone",
+            "roadmap",
             "notes",
+            "primary_basket",
+            "primary_basket_softwares",
             "open_ticket_count",
+            "automated_ticket_count",
+            "manual_ticket_count",
             "ticket_count_synced_at",
             "last_ticket_sync_error",
             "jira_synced_at",
             "documents",
             "sme_staff",
             "needs_patching",
+            "patching_status",
+            "cert_status",
+            "zabbix_status_rollup",
         ]
         read_only_fields = [
             "id",
             "jira_org_id",
             "jira_name",
             "display_name",
+            "primary_basket_softwares",
             "documents",
             "sme_staff",
             "open_ticket_count",
+            "automated_ticket_count",
+            "manual_ticket_count",
             "ticket_count_synced_at",
             "last_ticket_sync_error",
             "jira_synced_at",
             "needs_patching",
+            "patching_status",
+            "cert_status",
+            "zabbix_status_rollup",
+        ]
+
+    def get_primary_basket_softwares(self, obj):
+        """Inline the basket's softwares so the SPA renders the at-a-glance
+        list without an extra round-trip. Empty list when no primary basket
+        is set; basket itself may have zero softwares (also fine)."""
+        basket = obj.primary_basket
+        if basket is None or basket.deleted_at is not None:
+            return []
+        # BasketSoftware → software M2M-ish join. After the SoftwareVersion
+        # squash a Software row IS its version, so we expose version + status
+        # alongside the name for the customer-detail summary.
+        return [
+            {
+                "id": str(entry.software.id),
+                "name": entry.software.name,
+                "version": entry.software.version,
+                "status": entry.software.status,
+            }
+            for entry in basket.software_entries.select_related("software").all()
         ]
 
     def get_sme_staff(self, obj):
@@ -63,6 +103,53 @@ class OrganizationSerializer(serializers.ModelSerializer):
 
         return organization_needs_patching(obj)
 
+    def get_patching_status(self, obj):
+        from baskets.services import organization_patching_rollup
+
+        return organization_patching_rollup(obj)
+
+    def get_zabbix_status_rollup(self, obj):
+        """Placeholder rollup with a customer-opt-out short-circuit.
+
+        - If the customer is flagged not_using_zabbix, return "na" — the
+          customers list renders that as an "N/A" label instead of a dot.
+        - Otherwise return "green" for now, pending the live Zabbix
+          integration. Swap this branch in when the upstream data source
+          lands; the "na" short-circuit should stay.
+        """
+        if obj.not_using_zabbix:
+            return "na"
+        return "green"
+
+    def get_cert_status(self, obj):
+        """Roll-up of server cert_expires_on across the org.
+
+          - 'red'     : any cert is in the past (expired)
+          - 'yellow'  : any cert is within 30 days but none expired
+          - 'green'   : all set certs are 30+ days away
+          - 'unknown' : no servers or no certs set yet
+
+        Relies on prefetch_related('environments__servers') on the queryset
+        to avoid N+1 — both related managers are SoftDeleteManagers so
+        deleted rows are excluded automatically.
+        """
+        from datetime import date, timedelta
+
+        today = date.today()
+        soon = today + timedelta(days=30)
+        dates: list = []
+        for env in obj.environments.all():
+            for srv in env.servers.all():
+                if srv.cert_expires_on:
+                    dates.append(srv.cert_expires_on)
+        if not dates:
+            return "unknown"
+        if any(d < today for d in dates):
+            return "red"
+        if any(d < soon for d in dates):
+            return "yellow"
+        return "green"
+
 
 class OrgUserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -73,9 +160,13 @@ class OrgUserSerializer(serializers.ModelSerializer):
             "jira_account_id",
             "display_name",
             "email",
+            "local_display_name",
+            "local_email",
             "role",
             "alerts_enabled",
             "is_primary",
+            "ams_report",
+            "is_hidden",
         ]
         read_only_fields = [
             "id",
@@ -106,6 +197,7 @@ class ServerSerializer(serializers.ModelSerializer):
             "environment",
             "environment_name",
             "name",
+            "ip_address",
             "notes",
             "cert_expires_on",
             "baskets",
@@ -139,13 +231,13 @@ class ServerSerializer(serializers.ModelSerializer):
                 "id": str(i.id),
                 "software": str(i.software_id),
                 "software_name": i.software.name,
-                "software_version": str(i.software_version_id),
-                "version_label": i.software_version.version,
+                "version_label": i.software.version,
                 "software_release": str(i.software_release_id) if i.software_release_id else None,
                 "release_name": i.software_release.release_name if i.software_release else None,
+                "functionally_latest": i.functionally_latest,
             }
             for i in obj.installed_software.select_related(
-                "software", "software_version", "software_release"
+                "software", "software_release"
             ).all()
         ]
 

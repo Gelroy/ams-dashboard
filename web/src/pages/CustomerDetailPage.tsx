@@ -5,7 +5,9 @@ import {
   createOrgDocument,
   deleteOrgDocument,
   getOrganization,
+  listBaskets,
   listOrgUsers,
+  listPatchHistory,
   updateOrganization,
   updateOrgDocument,
   updateOrgUser,
@@ -14,19 +16,22 @@ import { CustomerAnalyticsSection } from '../components/CustomerAnalyticsSection
 import { CustomerSystemsSection } from '../components/CustomerSystemsSection'
 import type {
   AmsLevel,
+  Basket,
+  Country,
   EditableOrgFields,
   Organization,
   OrgUser,
-  ZabbixStatus,
+  PatchHistoryEntry,
 } from '../types'
 
 const AMS_LEVELS: AmsLevel[] = ['Essential', 'Enhanced', 'Expert']
-const ZABBIX_STATUSES: ZabbixStatus[] = ['Good', 'Issue']
+const COUNTRIES: Country[] = ['US', 'CA']
 
 export function CustomerDetailPage() {
   const { id = '' } = useParams<{ id: string }>()
   const [org, setOrg] = useState<Organization | null>(null)
   const [users, setUsers] = useState<OrgUser[]>([])
+  const [baskets, setBaskets] = useState<Basket[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -34,11 +39,14 @@ export function CustomerDetailPage() {
     let cancelled = false
     setLoading(true)
     setError(null)
-    Promise.all([getOrganization(id), listOrgUsers(id)])
-      .then(([orgData, usersData]) => {
+    // listBaskets is small and shared — fetched once with the org so the
+    // Primary Basket dropdown is populated alongside everything else.
+    Promise.all([getOrganization(id), listOrgUsers(id), listBaskets()])
+      .then(([orgData, usersData, basketsData]) => {
         if (cancelled) return
         setOrg(orgData)
         setUsers(usersData.results)
+        setBaskets(basketsData)
       })
       .catch((e: Error) => {
         if (cancelled) return
@@ -70,16 +78,19 @@ export function CustomerDetailPage() {
       </div>
 
       <CollapsibleSection title="Details">
-        <DetailsSection org={org} onUpdated={setOrg} />
+        <DetailsSection org={org} baskets={baskets} onUpdated={setOrg} />
       </CollapsibleSection>
       <CollapsibleSection title="Customer Systems">
         <CustomerSystemsSection orgId={id} />
       </CollapsibleSection>
-      <CollapsibleSection title="Users">
+      <CollapsibleSection title="Users" defaultOpen={false}>
         <UsersSection orgId={id} users={users} onUsersChanged={setUsers} />
       </CollapsibleSection>
       <CollapsibleSection title="Analytics">
         <CustomerAnalyticsSection orgId={id} />
+      </CollapsibleSection>
+      <CollapsibleSection title="Patch History">
+        <PatchHistorySection orgId={id} />
       </CollapsibleSection>
     </div>
   )
@@ -124,21 +135,31 @@ function CollapsibleSection({
 
 function DetailsSection({
   org,
+  baskets,
   onUpdated,
 }: {
   org: Organization
+  baskets: Basket[]
   onUpdated: (o: Organization) => void
 }) {
   const [draft, setDraft] = useState<EditableOrgFields>({
     local_name: org.local_name,
     ams_level: org.ams_level,
     zabbix_status: org.zabbix_status,
+    not_using_zabbix: org.not_using_zabbix,
+    country: org.country,
     help_desk_phone: org.help_desk_phone,
+    roadmap: org.roadmap,
     notes: org.notes,
+    primary_basket: org.primary_basket,
   })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<number | null>(null)
+  // Primary basket auto-saves on dropdown change (separate from the
+  // batched Save Changes flow); track its own error so a basket-save
+  // failure doesn't pollute the global form's saveError.
+  const [basketError, setBasketError] = useState<string | null>(null)
 
   const set = <K extends keyof EditableOrgFields>(key: K, value: EditableOrgFields[K]) =>
     setDraft((d) => ({ ...d, [key]: value }))
@@ -180,28 +201,9 @@ function DetailsSection({
             ))}
           </select>
         </Field>
-        <Field label="Zabbix Status">
-          <select
-            className="input"
-            value={draft.zabbix_status ?? ''}
-            onChange={(e) => set('zabbix_status', (e.target.value as ZabbixStatus) || null)}
-          >
-            <option value="">— Not set —</option>
-            {ZABBIX_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Help Desk #">
-          <input
-            className="input"
-            value={draft.help_desk_phone ?? ''}
-            placeholder="5551234567"
-            onChange={(e) => set('help_desk_phone', e.target.value || null)}
-          />
-        </Field>
+        {/* Zabbix / Country / Help Desk # moved to the bottom of the form
+            so the most edit-frequent strategic fields (Roadmap, Notes,
+            Primary Basket) sit higher in reading order. */}
         <Field label="Documents" wide>
           <DocumentsField org={org} onChanged={onUpdated} />
         </Field>
@@ -229,17 +231,46 @@ function DetailsSection({
             </div>
           )}
         </Field>
-        <Field label="Notes" wide>
-          <textarea
-            className="input textarea"
-            rows={3}
-            value={draft.notes ?? ''}
-            onChange={(e) => set('notes', e.target.value || null)}
+        <Field label="Primary Basket" wide>
+          <PrimaryBasketField
+            value={draft.primary_basket}
+            baskets={baskets}
+            // Server-derived snapshot from the FK; refreshes immediately
+            // because the dropdown auto-PATCHes (below).
+            softwares={org.primary_basket_softwares}
+            error={basketError}
+            onChange={(v) => {
+              // Update local draft so the select stays controlled, then
+              // PATCH right away so the chip list refreshes without
+              // needing the global Save button. Other unsaved fields in
+              // `draft` are left untouched — we send only primary_basket.
+              set('primary_basket', v)
+              setBasketError(null)
+              updateOrganization(org.id, { primary_basket: v })
+                .then(onUpdated)
+                .catch((e: Error) => setBasketError(e.message))
+            }}
           />
         </Field>
+        <ExpandableField
+          label="Roadmap"
+          value={draft.roadmap ?? null}
+          onChange={(v) => set('roadmap', v)}
+        />
+        <ExpandableField
+          label="Notes"
+          value={draft.notes ?? null}
+          onChange={(v) => set('notes', v)}
+        />
         <Field label="Open Tickets">
           <span className="meta">
             {org.open_ticket_count ?? '—'}
+            {(org.automated_ticket_count != null || org.manual_ticket_count != null) && (
+              <>
+                {' · '}Automated {org.automated_ticket_count ?? '—'} / Manual{' '}
+                {org.manual_ticket_count ?? '—'}
+              </>
+            )}
             {org.ticket_count_synced_at && (
               <> · synced {new Date(org.ticket_count_synced_at).toLocaleString()}</>
             )}
@@ -249,6 +280,45 @@ function DetailsSection({
           <span className="meta">
             {org.jira_synced_at ? new Date(org.jira_synced_at).toLocaleString() : '—'}
           </span>
+        </Field>
+        {/* Contact / geo / monitoring opt-out — kept at the bottom of the
+            form so the daily-edit strategic fields rise to the top. The
+            2-column grid puts Help Desk # in column 1 and Country in
+            column 2 on the same row; Not Using Zabbix occupies the next
+            row by itself, sitting just above the Save button. */}
+        <Field label="Help Desk #">
+          <input
+            className="input"
+            value={draft.help_desk_phone ?? ''}
+            placeholder="5551234567"
+            onChange={(e) => set('help_desk_phone', e.target.value || null)}
+          />
+        </Field>
+        <Field label="Country">
+          <select
+            className="input"
+            value={draft.country ?? ''}
+            onChange={(e) => set('country', (e.target.value as Country) || null)}
+          >
+            <option value="">— Not set —</option>
+            {COUNTRIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Zabbix">
+          <label
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 0' }}
+          >
+            <input
+              type="checkbox"
+              checked={!!draft.not_using_zabbix}
+              onChange={(e) => set('not_using_zabbix', e.target.checked)}
+            />
+            Not Using Zabbix
+          </label>
         </Field>
       </div>
       <div className="form-actions">
@@ -456,6 +526,40 @@ function formatPhone(raw: string): string {
   return raw
 }
 
+/** Copy `text` to the system clipboard. Prefers the async Clipboard API
+ *  (only available in secure contexts — i.e., HTTPS or localhost), and
+ *  falls back to the older execCommand path with a hidden textarea so the
+ *  header-click email copy works during the HTTP-only window before our
+ *  cert lands. Returns true if the copy succeeded. */
+async function copyToClipboard(text: string): Promise<boolean> {
+  // Prefer the async API when allowed.
+  if (typeof navigator !== 'undefined' && navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // fall through to legacy path
+    }
+  }
+  // Legacy fallback — works on http:// pages where the async API is gated.
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.top = '-1000px'
+    ta.style.opacity = '0'
+    ta.setAttribute('readonly', '')
+    document.body.appendChild(ta)
+    ta.select()
+    ta.setSelectionRange(0, text.length)
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
+}
+
 function UsersSection({
   orgId,
   users,
@@ -467,6 +571,16 @@ function UsersSection({
 }) {
   const [savingId, setSavingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // JIRA syncs every user assigned to an org, but the AMS team only deals
+  // with a subset. Hidden rows stay in the DB (so sync keeps them current
+  // in case they become relevant again) but disappear from the table until
+  // this is toggled on.
+  const [showHidden, setShowHidden] = useState(false)
+  // Transient feedback after a header-click copy. Cleared by a timer.
+  const [copyMsg, setCopyMsg] = useState<string | null>(null)
+
+  const visibleUsers = showHidden ? users : users.filter((u) => !u.is_hidden)
+  const hiddenCount = users.filter((u) => u.is_hidden).length
 
   const patchUser = (userId: string, patch: Partial<OrgUser>) => {
     // Optimistic update
@@ -481,12 +595,63 @@ function UsersSection({
       .finally(() => setSavingId(null))
   }
 
+  const copyEmailsForFlag = (
+    flag: 'alerts_enabled' | 'is_primary' | 'ams_report',
+    label: string,
+  ) => {
+    // Prefer the local override; fall back to the JIRA email.
+    const emails = users
+      .filter((u) => u[flag])
+      .map((u) => (u.local_email ?? u.email ?? '').trim())
+      .filter(Boolean)
+    if (emails.length === 0) {
+      flashCopyMsg(`No users have ${label} checked.`)
+      return
+    }
+    const text = emails.join('; ')
+    copyToClipboard(text)
+      .then((ok) => {
+        flashCopyMsg(
+          ok
+            ? `Copied ${emails.length} ${label} email${emails.length === 1 ? '' : 's'}`
+            : 'Copy failed — your browser blocked clipboard access.',
+        )
+      })
+      .catch(() => flashCopyMsg('Copy failed — your browser blocked clipboard access.'))
+  }
+
+  const flashCopyMsg = (msg: string) => {
+    setCopyMsg(msg)
+    window.setTimeout(() => setCopyMsg(null), 2500)
+  }
+
   return (
     <>
       {error && <div className="error-banner">{error}</div>}
+
+      <div className="filter-bar">
+        <label className="filter-checkbox">
+          <input
+            type="checkbox"
+            checked={showHidden}
+            onChange={(e) => setShowHidden(e.target.checked)}
+          />
+          Show hidden users
+          {hiddenCount > 0 && (
+            <span className="meta"> ({hiddenCount} hidden)</span>
+          )}
+        </label>
+        {copyMsg && <span className="meta">· {copyMsg}</span>}
+      </div>
+
       {users.length === 0 ? (
         <div className="state-cell">
           No users synced yet. Run <code>python manage.py sync_jira_users</code>.
+        </div>
+      ) : visibleUsers.length === 0 ? (
+        <div className="state-cell">
+          All {users.length} users are hidden. Toggle &ldquo;Show hidden users&rdquo; above
+          to bring them back.
         </div>
       ) : (
         <div className="table-wrap">
@@ -495,22 +660,80 @@ function UsersSection({
               <tr>
                 <th>Name</th>
                 <th>Email</th>
-                <th>Role</th>
-                <th style={{ width: 80 }}>Alerts</th>
-                <th style={{ width: 80 }}>Primary</th>
+                <th style={{ width: 120 }}>Role</th>
+                <th
+                  style={{ width: 80, cursor: 'pointer' }}
+                  onClick={() => copyEmailsForFlag('alerts_enabled', 'Alerts')}
+                  title="Click to copy emails of users with Alerts checked"
+                >
+                  Alerts <span className="meta">⧉</span>
+                </th>
+                <th
+                  style={{ width: 80, cursor: 'pointer' }}
+                  onClick={() => copyEmailsForFlag('is_primary', 'Primary')}
+                  title="Click to copy emails of users with Primary checked"
+                >
+                  Primary <span className="meta">⧉</span>
+                </th>
+                <th
+                  style={{ width: 100, cursor: 'pointer' }}
+                  onClick={() => copyEmailsForFlag('ams_report', 'AMS Report')}
+                  title="Click to copy emails of users with AMS Report checked"
+                >
+                  AMS Report <span className="meta">⧉</span>
+                </th>
+                <th style={{ width: 60 }}>Hide</th>
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
-                <tr key={u.id}>
+              {visibleUsers.map((u) => (
+                <tr key={u.id} style={u.is_hidden ? { opacity: 0.5 } : undefined}>
                   <td>
-                    <strong>{u.display_name || '—'}</strong>
+                    <input
+                      key={`name-${u.id}-${u.local_display_name ?? ''}-${u.display_name ?? ''}`}
+                      className="input compact"
+                      defaultValue={u.local_display_name ?? u.display_name ?? ''}
+                      placeholder={u.display_name ?? '—'}
+                      title={
+                        u.display_name
+                          ? `JIRA: ${u.display_name}`
+                          : 'No JIRA display name'
+                      }
+                      onBlur={(e) => {
+                        const typed = e.target.value.trim()
+                        const desired = typed || null
+                        // Typing the JIRA value back == clearing the override.
+                        const normalized =
+                          desired !== null && desired === u.display_name ? null : desired
+                        if (normalized !== (u.local_display_name ?? null)) {
+                          patchUser(u.id, { local_display_name: normalized })
+                        }
+                      }}
+                    />
                     {savingId === u.id && <span className="meta"> · saving…</span>}
                   </td>
-                  <td className="meta">{u.email || '—'}</td>
+                  <td>
+                    <input
+                      key={`email-${u.id}-${u.local_email ?? ''}-${u.email ?? ''}`}
+                      className="input compact"
+                      defaultValue={u.local_email ?? u.email ?? ''}
+                      placeholder={u.email ?? '—'}
+                      title={u.email ? `JIRA: ${u.email}` : 'No JIRA email'}
+                      onBlur={(e) => {
+                        const typed = e.target.value.trim()
+                        const desired = typed || null
+                        const normalized =
+                          desired !== null && desired === u.email ? null : desired
+                        if (normalized !== (u.local_email ?? null)) {
+                          patchUser(u.id, { local_email: normalized })
+                        }
+                      }}
+                    />
+                  </td>
                   <td>
                     <input
                       className="input compact"
+                      style={{ width: 100 }}
                       value={u.role ?? ''}
                       placeholder="—"
                       onChange={(e) =>
@@ -535,6 +758,21 @@ function UsersSection({
                       onChange={(e) => patchUser(u.id, { is_primary: e.target.checked })}
                     />
                   </td>
+                  <td style={{ textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={u.ams_report}
+                      onChange={(e) => patchUser(u.id, { ams_report: e.target.checked })}
+                    />
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={u.is_hidden}
+                      onChange={(e) => patchUser(u.id, { is_hidden: e.target.checked })}
+                      title={u.is_hidden ? 'Currently hidden — uncheck to restore' : 'Hide this user from the default view'}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -543,6 +781,135 @@ function UsersSection({
       )}
     </>
   )
+}
+
+function PatchHistorySection({ orgId }: { orgId: string }) {
+  const [entries, setEntries] = useState<PatchHistoryEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [envFilter, setEnvFilter] = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    setError(null)
+    listPatchHistory({ organization: orgId })
+      .then(setEntries)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [orgId])
+
+  if (loading) return <div className="state-cell">Loading…</div>
+  if (error) return <div className="error-banner">{error}</div>
+  if (entries.length === 0) {
+    return (
+      <div className="state-cell">
+        No patches recorded yet for this customer. Rows appear here when a
+        Patch Execution is finalized (one row per software release applied).
+      </div>
+    )
+  }
+
+  // Distinct envs for the filter dropdown.
+  const envNames = Array.from(new Set(entries.map((e) => e.environment_name))).sort()
+
+  // Apply env filter.
+  const visible = envFilter
+    ? entries.filter((e) => e.environment_name === envFilter)
+    : entries
+
+  // Group by software_name. Within each, sort ascending by patched_on so
+  // the row order *is* the evolution story (oldest → newest, .10 → .11 → .12).
+  const bySoftware = new Map<string, PatchHistoryEntry[]>()
+  for (const e of visible) {
+    const arr = bySoftware.get(e.software_name) ?? []
+    arr.push(e)
+    bySoftware.set(e.software_name, arr)
+  }
+  for (const arr of bySoftware.values()) {
+    arr.sort((a, b) => a.patched_on.localeCompare(b.patched_on))
+  }
+  const softwareNames = Array.from(bySoftware.keys()).sort()
+
+  return (
+    <>
+      <div className="filter-bar">
+        <label className="filter-checkbox">
+          Environment:
+          <select
+            className="input compact"
+            value={envFilter}
+            onChange={(e) => setEnvFilter(e.target.value)}
+            style={{ marginLeft: '0.5rem' }}
+          >
+            <option value="">All</option>
+            {envNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="meta">
+          {visible.length} patch{visible.length === 1 ? '' : 'es'} across{' '}
+          {softwareNames.length} software item{softwareNames.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {softwareNames.map((name) => {
+        const rows = bySoftware.get(name)!
+        return (
+          <div key={name} className="patch-history-software">
+            <h4 className="patch-history-heading">{name}</h4>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 130 }}>Date</th>
+                    <th style={{ width: 110 }}>Environment</th>
+                    <th>Release</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((e) => (
+                    <tr key={e.id}>
+                      <td>{formatPatchDate(e.patched_on)}</td>
+                      <td>{e.environment_name}</td>
+                      <td>
+                        {e.from_release ? (
+                          <>
+                            <span className="meta">{e.from_release}</span>
+                            {' → '}
+                            <strong>{e.to_release}</strong>
+                          </>
+                        ) : (
+                          <>
+                            <span className="meta">initial</span>
+                            {' → '}
+                            <strong>{e.to_release}</strong>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
+function formatPatchDate(iso: string): string {
+  // PatchHistory.patched_on is a date-only string (YYYY-MM-DD). Anchor to
+  // local midnight so Date() doesn't apply a TZ shift.
+  const d = new Date(iso + 'T00:00:00')
+  return d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
 function Field({
@@ -559,5 +926,90 @@ function Field({
       <div className="field-label">{label}</div>
       <div className="field-control">{children}</div>
     </div>
+  )
+}
+
+/** Primary Basket dropdown + the basket's softwares preview. The softwares
+ *  list is rendered from the org's server-derived snapshot, so it lags by
+ *  one Save round-trip when the user picks a different basket — until they
+ *  click Save the dropdown reflects the draft choice but the list still
+ *  shows the previously-saved basket's contents. Acceptable tradeoff vs
+ *  fetching basket details on every dropdown change. */
+function PrimaryBasketField({
+  value,
+  baskets,
+  softwares,
+  error,
+  onChange,
+}: {
+  value: string | null | undefined
+  baskets: Basket[]
+  softwares: Organization['primary_basket_softwares']
+  error: string | null
+  onChange: (next: string | null) => void
+}) {
+  return (
+    <div>
+      <select
+        className="input"
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value || null)}
+      >
+        <option value="">— Not set —</option>
+        {baskets.map((b) => (
+          <option key={b.id} value={b.id}>
+            {b.name}
+          </option>
+        ))}
+      </select>
+      {error && <div className="error-text" style={{ marginTop: 6 }}>{error}</div>}
+      {value && softwares.length === 0 && (
+        <div className="meta" style={{ marginTop: 6 }}>
+          This basket has no software pinned yet.
+        </div>
+      )}
+      {softwares.length > 0 && (
+        <div className="env-chips" style={{ marginTop: 6 }}>
+          {softwares.map((s) => (
+            <span key={s.id} className="env-chip" title={`Status: ${s.status}`}>
+              {s.name} ({s.version})
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Collapsible long-form text field. Wide by default (spans the form grid),
+ *  collapsed when first rendered. Summary shows the label + a short status
+ *  hint so users can tell at a glance whether content exists. */
+function ExpandableField({
+  label,
+  value,
+  onChange,
+  rows = 6,
+}: {
+  label: string
+  value: string | null
+  onChange: (next: string | null) => void
+  rows?: number
+}) {
+  const trimmed = (value ?? '').trim()
+  const hint = trimmed ? `${trimmed.length} chars` : 'empty'
+  return (
+    <details className="field field-wide expandable-field">
+      <summary className="field-label expandable-summary">
+        {label}
+        <span className="meta" style={{ marginLeft: 8 }}>· {hint}</span>
+      </summary>
+      <textarea
+        className="input textarea"
+        rows={rows}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value || null)}
+        style={{ marginTop: 6, width: '100%' }}
+      />
+    </details>
   )
 }

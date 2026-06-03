@@ -36,6 +36,11 @@ class ZabbixStatus(models.TextChoices):
     ISSUE = "Issue", "Issue"
 
 
+class Country(models.TextChoices):
+    US = "US", "US"
+    CA = "CA", "CA"
+
+
 class Organization(SoftDeleteModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     jira_org_id = models.TextField()
@@ -45,9 +50,42 @@ class Organization(SoftDeleteModel):
     zabbix_status = models.CharField(
         max_length=8, choices=ZabbixStatus.choices, null=True, blank=True
     )
+    # Customer opted out of Zabbix monitoring entirely. When true, the
+    # Customers-list rollup shows "N/A" instead of a colored dot. Replaces
+    # the old per-org Good/Issue dropdown in the UI (the zabbix_status
+    # field above is kept for now to preserve existing data, but no
+    # longer surfaced in the customer detail form).
+    not_using_zabbix = models.BooleanField(default=False)
+    country = models.CharField(
+        max_length=2, choices=Country.choices, null=True, blank=True
+    )
     help_desk_phone = models.TextField(null=True, blank=True)
+    # Long-form strategic-planning notes — separate from the operational
+    # `notes` field so the team can keep day-to-day observations distinct
+    # from forward-looking plans.
+    roadmap = models.TextField(null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
+    # The team's at-a-glance summary of the software stack this customer
+    # runs. Distinct from per-server Basket assignment — this is the
+    # *expected* baseline. Optional; left null on customers without a
+    # canonical primary stack. SET_NULL on basket delete so a removed
+    # basket doesn't cascade-delete the customer.
+    primary_basket = models.ForeignKey(
+        "baskets.Basket",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="primary_for_organizations",
+    )
     open_ticket_count = models.IntegerField(null=True, blank=True)
+    # Split of open_ticket_count: tickets assigned to an "*Alert*" user
+    # (automated/monitoring origin) vs everything else (manual / human-
+    # initiated). Either may be null if a sync error happened before the
+    # split was computed; in that case open_ticket_count may still be the
+    # last-known total. Sum invariant: automated + manual == open_ticket_count
+    # when both are non-null.
+    automated_ticket_count = models.IntegerField(null=True, blank=True)
+    manual_ticket_count = models.IntegerField(null=True, blank=True)
     ticket_count_synced_at = models.DateTimeField(null=True, blank=True)
     last_ticket_sync_error = models.TextField(null=True, blank=True)
     jira_synced_at = models.DateTimeField(null=True, blank=True)
@@ -117,9 +155,25 @@ class OrgUser(SoftDeleteModel):
     jira_account_id = models.TextField()
     display_name = models.TextField(null=True, blank=True)
     email = models.TextField(null=True, blank=True)
+    # Local overrides — same pattern as Organization.local_name. When set
+    # they take precedence in the UI; the JIRA-synced value stays in
+    # display_name/email so it can be surfaced via tooltip and used as a
+    # fallback. sync_jira_users only writes display_name + email so these
+    # are never clobbered by a sync.
+    local_display_name = models.TextField(null=True, blank=True)
+    local_email = models.TextField(null=True, blank=True)
     role = models.TextField(null=True, blank=True)
     alerts_enabled = models.BooleanField(default=False)
     is_primary = models.BooleanField(default=False)
+    # Whether this user should receive the periodic AMS report email.
+    # Local-only flag; never written by sync_jira_users.
+    ams_report = models.BooleanField(default=False)
+    # Local-only display flag — lets the team hide JIRA-synced users they
+    # don't actively work with from the Customer Detail Users table, while
+    # keeping the row intact so it stays in sync if the user becomes
+    # relevant again later. Toggled via the UI; sync_jira_users never
+    # writes this field.
+    is_hidden = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -177,6 +231,9 @@ class Server(SoftDeleteModel):
         Environment, on_delete=models.CASCADE, related_name="servers"
     )
     name = models.TextField()
+    # IPv4 address (validated by GenericIPAddressField). Optional — not every
+    # server will have one recorded.
+    ip_address = models.GenericIPAddressField(protocol="IPv4", null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
     cert_expires_on = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

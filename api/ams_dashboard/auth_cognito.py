@@ -54,6 +54,15 @@ class _CognitoUser:
         self.sub = claims.get("sub", "")
         self.email = claims.get("email")
         self.username = claims.get("cognito:username") or self.email or self.sub
+        # `cognito:groups` is a list of group names on id_tokens and
+        # access_tokens when the user is a member of at least one group.
+        # Missing entirely → user is in no groups → implicit viewer.
+        raw_groups = claims.get("cognito:groups") or []
+        self.groups = list(raw_groups) if isinstance(raw_groups, (list, tuple)) else []
+
+    @property
+    def is_admin(self) -> bool:
+        return "admin" in self.groups
 
     def __str__(self) -> str:
         return self.username or self.sub

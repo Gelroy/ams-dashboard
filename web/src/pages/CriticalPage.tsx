@@ -45,10 +45,24 @@ export function CriticalPage() {
 
   const visibleDays = hideWeekends ? days.filter((d) => d.dow !== 0 && d.dow !== 6) : days
 
+  // Date-based split: anything before today is "Overdue" (the backend already
+  // tags individual labels with EXPIRED / OVERDUE prefixes where appropriate);
+  // today + future is "Upcoming". Past patch-history rows also fall into the
+  // bottom section — they are factually past events even though they are not
+  // strictly "overdue", and lumping them there keeps the dashboard's forward-
+  // looking view uncluttered.
+  const upcomingDays = visibleDays.filter((d) => d.events.length > 0 && d.date >= todayKey)
+  // Reverse so the most-recently-missed items are at the top of the Overdue
+  // section — older, less actionable items sink to the bottom.
+  const overdueDays = visibleDays
+    .filter((d) => d.events.length > 0 && d.date < todayKey)
+    .slice()
+    .reverse()
+
   return (
     <div>
       <div className="panel-header-row">
-        <span className="panel-title">Critical — next 6 weeks</span>
+        <span className="panel-title">Critical — past 6 weeks + next 6 weeks</span>
         <span className="panel-hint">
           {data.events.length} event{data.events.length === 1 ? '' : 's'}
         </span>
@@ -72,11 +86,17 @@ export function CriticalPage() {
         </div>
       )}
 
-      {data.events.length > 0 && (
-        <div className="critical-list">
-          {visibleDays
-            .filter((d) => d.events.length > 0)
-            .map((d) => (
+      {upcomingDays.length > 0 && (
+        <>
+          <div className="panel-header-row" style={{ marginTop: 12 }}>
+            <span className="panel-title">Upcoming Tasks</span>
+            <span className="panel-hint">
+              {upcomingDays.reduce((n, d) => n + d.events.length, 0)} event
+              {upcomingDays.reduce((n, d) => n + d.events.length, 0) === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="critical-list">
+            {upcomingDays.map((d) => (
               <div key={d.date} className="critical-day">
                 <div
                   className={d.isToday ? 'critical-date critical-today' : 'critical-date'}
@@ -88,7 +108,30 @@ export function CriticalPage() {
                 ))}
               </div>
             ))}
-        </div>
+          </div>
+        </>
+      )}
+
+      {overdueDays.length > 0 && (
+        <>
+          <div className="panel-header-row" style={{ marginTop: 24 }}>
+            <span className="panel-title">Overdue Tasks</span>
+            <span className="panel-hint">
+              {overdueDays.reduce((n, d) => n + d.events.length, 0)} event
+              {overdueDays.reduce((n, d) => n + d.events.length, 0) === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="critical-list">
+            {overdueDays.map((d) => (
+              <div key={d.date} className="critical-day">
+                <div className="critical-date">{formatDateHeader(d.date)}</div>
+                {d.events.map((e, i) => (
+                  <EventRow key={i} event={e} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   )
@@ -102,6 +145,7 @@ function EventRow({ event }: { event: CriticalEvent }) {
       <span className="critical-kind">
         {event.kind === 'cert' && 'Cert'}
         {event.kind === 'patch' && 'Patch'}
+        {event.kind === 'patch_planned' && 'Planned'}
         {event.kind === 'activity' && (event.type ?? 'Activity')}
       </span>
       <span>{event.label}</span>
@@ -121,5 +165,5 @@ function formatDateHeader(iso: string): string {
   const d = new Date(iso + 'T00:00:00')
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-  return `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`
+  return `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
 }

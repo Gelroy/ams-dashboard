@@ -158,7 +158,9 @@ _auth_classes = (
 _permission_classes = (
     ["rest_framework.permissions.AllowAny"]
     if AUTH_BYPASS
-    else ["rest_framework.permissions.IsAuthenticated"]
+    # Real deploys: read for anyone authenticated, write only for the
+    # `admin` Cognito group. See ams_dashboard/permissions.py.
+    else ["ams_dashboard.permissions.IsAdminOrReadOnly"]
 )
 
 REST_FRAMEWORK = {
