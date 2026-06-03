@@ -329,13 +329,22 @@ function AddCustomerAnalyticForm({
   )
 }
 
-/** Strip trailing zeros from a DecimalField string so "100.0000" renders
- *  as "100" and "100.5400" as "100.54". Storage stays Decimal — this is
- *  display-only. Returns "—" for null/undefined. */
+/** Display-only normaliser for the DecimalField string value:
+ *  1. Strip trailing zeros from the fractional part ("100.0000" → "100").
+ *  2. Drop a dangling decimal point if nothing's left ("100." → "100").
+ *  3. Insert thousands separators into the integer part ("1234567" → "1,234,567").
+ *
+ *  String-only manipulation — avoids parseFloat so precision survives for
+ *  large values (DecimalField max_digits=20). Returns "—" for null/empty;
+ *  falls back to the stripped string for anything that doesn't look like
+ *  a plain signed decimal. */
 function formatAnalyticValue(v: string | null | undefined): string {
   if (v == null || v === '') return '—'
-  // Strip trailing zeros from the fractional part, then drop a dangling
-  // decimal point if nothing's left. Leaves whole numbers and meaningful
-  // decimals alone.
-  return v.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
+  const stripped = v.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
+  const m = stripped.match(/^(-?)(\d+)(\.\d+)?$/)
+  if (!m) return stripped
+  const [, sign, intPart, frac = ''] = m
+  // \B(?=(\d{3})+(?!\d)) — insert at every position followed by groups
+  // of three digits to the end of the integer part.
+  return sign + intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + frac
 }
