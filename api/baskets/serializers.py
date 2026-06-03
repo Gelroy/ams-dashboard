@@ -67,8 +67,11 @@ class ServerInstalledSoftwareSerializer(serializers.ModelSerializer):
             "version_label",
             "software_release",
             "release_name",
+            "functionally_latest",
             "recorded_at",
         ]
+        # functionally_latest is intentionally writable — that's the whole
+        # point of the field; the SPA checkbox PATCHes it.
         read_only_fields = ["id", "server", "software_name", "version_label", "release_name", "recorded_at"]
 
 

@@ -210,6 +210,7 @@ class ServerSerializer(serializers.ModelSerializer):
                 "version_label": i.software.version,
                 "software_release": str(i.software_release_id) if i.software_release_id else None,
                 "release_name": i.software_release.release_name if i.software_release else None,
+                "functionally_latest": i.functionally_latest,
             }
             for i in obj.installed_software.select_related(
                 "software", "software_release"

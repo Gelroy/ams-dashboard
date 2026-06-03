@@ -542,21 +542,25 @@ function InstalledRow({
   catalog: Software[]
   onChanged: () => void
 }) {
-  // Optimistic copy of the only editable field (release). The controlled
-  // <select> renders from this immediately on change so the user sees their
-  // pick stick instead of snapping back during the PATCH round-trip. The
-  // optimistic value is overwritten when `entry` arrives fresh from the
-  // parent's refresh (useEffect below). On PATCH failure we surface the
+  // Optimistic copies of the two editable fields (release, functionally_latest).
+  // The controlled inputs render from these immediately on change so the user
+  // sees their pick stick instead of snapping back during the PATCH round-trip.
+  // The optimistic value is overwritten when `entry` arrives fresh from the
+  // parent's refresh (useEffects below). On PATCH failure we surface the
   // error and roll back.
   const [pendingRelease, setPendingRelease] = useState<string | null>(
     entry.software_release ?? null,
   )
+  const [pendingFnLatest, setPendingFnLatest] = useState(entry.functionally_latest)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     setPendingRelease(entry.software_release ?? null)
   }, [entry.software_release])
+  useEffect(() => {
+    setPendingFnLatest(entry.functionally_latest)
+  }, [entry.functionally_latest])
 
   // After the SoftwareVersion squash, a Software row IS a specific version,
   // so its releases hang off the Software directly. The previous version
@@ -565,7 +569,7 @@ function InstalledRow({
   const releases = sw?.releases ?? []
 
   const patch = (
-    body: { software_release?: string | null },
+    body: { software_release?: string | null; functionally_latest?: boolean },
     optimistic: () => void,
     rollback: () => void,
   ) => {
@@ -606,6 +610,30 @@ function InstalledRow({
           </option>
         ))}
       </select>
+      {/* Functionally Latest — per-server override for interim fixes that
+          don't apply (e.g. UNIX-only release on a Windows customer). When
+          checked, this server is treated as up-to-date for Needs Patching
+          and skipped by the auto-PatchExecution-on-new-Latest signal. */}
+      <label
+        className="filter-checkbox"
+        title="Treat the currently installed release as Latest for this server (overrides the catalog). Use when an interim release doesn't apply to this customer."
+      >
+        <input
+          type="checkbox"
+          checked={pendingFnLatest}
+          disabled={saving}
+          onChange={(e) => {
+            const newVal = e.target.checked
+            const prev = pendingFnLatest
+            patch(
+              { functionally_latest: newVal },
+              () => setPendingFnLatest(newVal),
+              () => setPendingFnLatest(prev),
+            )
+          }}
+        />
+        Functionally Latest
+      </label>
       <button
         className="btn-icon"
         disabled={saving}

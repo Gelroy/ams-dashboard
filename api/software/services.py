@@ -38,7 +38,7 @@ def autocreate_executions_for_latest_release(release) -> list:
     """
     # Imports are local to keep this module decoupled from import-order
     # surprises in apps.ready().
-    from baskets.models import BasketSoftware, ServerBasket
+    from baskets.models import BasketSoftware, ServerBasket, ServerInstalledSoftware
     from patching.models import (
         PatchExecution,
         PatchExecutionStatus,
@@ -94,6 +94,32 @@ def autocreate_executions_for_latest_release(release) -> list:
             if key in seen:
                 continue
             seen.add(key)
+
+            # functionally_latest opt-out: if ANY server in this env carries
+            # the override for the release's Software, assume the release
+            # doesn't apply to this customer and skip auto-creating the
+            # execution. The team can still create one manually if they
+            # decide the patch is needed; we just don't queue it for them
+            # automatically. Errs on the side of fewer false-positive
+            # PatchExecutions over silently surfacing inapplicable patches.
+            has_override = ServerInstalledSoftware.objects.filter(
+                server__environment_id=env.id,
+                server__server_baskets__basket_id=basket.id,
+                software_id=release.software_id,
+                functionally_latest=True,
+            ).exists()
+            if has_override:
+                logger.info(
+                    "Skipping auto-execution for org=%s env=%s basket=%s — "
+                    "at least one server is marked functionally_latest for "
+                    "%s (release %s).",
+                    org.id,
+                    env.id,
+                    basket.id,
+                    release.software_id,
+                    release.id,
+                )
+                continue
 
             try:
                 with transaction.atomic():

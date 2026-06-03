@@ -152,7 +152,14 @@ def finalize_execution(execution: PatchExecution) -> None:
             to_release = latest.release_name if latest else (installed.software_release.release_name if installed and installed.software_release else "")
             if installed:
                 installed.software_release = latest
-                installed.save(update_fields=["software_release"])
+                # Patch ran → server is now on the actual catalog Latest.
+                # Clear the override; leaving it True would silently mask
+                # the *next* SoftwareRelease becoming Latest, since the
+                # needs-patching check short-circuits on functionally_latest.
+                installed.functionally_latest = False
+                installed.save(
+                    update_fields=["software_release", "functionally_latest"]
+                )
             else:
                 ServerInstalledSoftware.objects.create(
                     server_id=server_id,

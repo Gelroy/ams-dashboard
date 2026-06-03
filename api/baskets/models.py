@@ -66,6 +66,16 @@ class ServerInstalledSoftware(models.Model):
     software_release = models.ForeignKey(
         SoftwareRelease, on_delete=models.RESTRICT, null=True, blank=True
     )
+    # Per-server override for the "Needs Patching" + auto-PatchExecution
+    # logic. When True, the currently installed release is treated as if it
+    # were the catalog's Latest — useful when an interim Latest doesn't
+    # apply to this customer (e.g. a UNIX-only fix on a Windows customer).
+    # Sticky: survives new SoftwareRelease rows becoming Latest, so the
+    # team only re-evaluates when they choose to. Reset to False by
+    # finalize_execution when a patch actually runs (the override is moot
+    # once the release matches Latest, and leaving it True would silently
+    # mask future Latests).
+    functionally_latest = models.BooleanField(default=False)
     recorded_at = models.DateTimeField(auto_now=True)
 
     class Meta:

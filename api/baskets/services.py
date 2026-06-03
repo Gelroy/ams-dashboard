@@ -138,6 +138,11 @@ def server_needs_patching(server) -> str:
             if latest is None:
                 continue
             has_data = True
+            # functionally_latest is the per-server override: if set, this
+            # specific server treats its installed release as Latest no
+            # matter what the catalog says (interim-fix-doesn't-apply case).
+            if installed.functionally_latest:
+                continue
             if installed.software_release_id != latest.id:
                 return "yes"
 

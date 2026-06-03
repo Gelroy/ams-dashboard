@@ -409,7 +409,7 @@ export function updateInstalledSoftware(
   orgId: string,
   serverId: string,
   id: string,
-  patch: { software_release?: string | null },
+  patch: { software_release?: string | null; functionally_latest?: boolean },
 ): Promise<ServerInstalledSoftwareEntry> {
   return request<ServerInstalledSoftwareEntry>(
     `/organizations/${orgId}/servers/${serverId}/installed/${id}/`,

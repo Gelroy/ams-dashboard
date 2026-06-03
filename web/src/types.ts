@@ -174,6 +174,10 @@ export interface ServerInstalledSoftwareEntry {
   version_label: string
   software_release: string | null
   release_name: string | null
+  // Per-server override: when true, this server's installed release is
+  // treated as the catalog Latest for Needs Patching + Patch Execution
+  // automation. Used for interim fixes that don't apply to this customer.
+  functionally_latest: boolean
 }
 
 export interface PatchGroupStep {
