@@ -114,8 +114,11 @@ def mark_step_done(execution: PatchExecution, step: PatchExecutionStep) -> bool:
 
 @transaction.atomic
 def finalize_execution(execution: PatchExecution) -> None:
-    """Mark execution completed, write patch_history, update each server's installed
-    release for the basket's software to the version's current Latest."""
+    """Mark execution completed, write patch_history, update each server's
+    installed release for the basket's software to that software's current
+    Latest release. After the SoftwareVersion squash the basket pins a
+    Software directly, so the "expected release" lookup is just
+    SoftwareRelease.filter(software=...)."""
     now = timezone.now()
     execution.status = PatchExecutionStatus.COMPLETED
     execution.completed_at = now
@@ -124,7 +127,7 @@ def finalize_execution(execution: PatchExecution) -> None:
     execution.save(update_fields=["status", "completed_at", "total_time"])
 
     entries = BasketSoftware.objects.filter(basket=execution.basket).select_related(
-        "software", "software_version"
+        "software"
     )
     server_ids = list(
         ServerBasket.objects.filter(
@@ -135,7 +138,7 @@ def finalize_execution(execution: PatchExecution) -> None:
     for entry in entries:
         latest = (
             SoftwareRelease.objects.filter(
-                software_version=entry.software_version,
+                software=entry.software,
                 status="Latest",
                 deleted_at__isnull=True,
             )
@@ -148,14 +151,12 @@ def finalize_execution(execution: PatchExecution) -> None:
             from_release = installed.software_release.release_name if (installed and installed.software_release) else None
             to_release = latest.release_name if latest else (installed.software_release.release_name if installed and installed.software_release else "")
             if installed:
-                installed.software_version = entry.software_version
                 installed.software_release = latest
-                installed.save(update_fields=["software_version", "software_release"])
+                installed.save(update_fields=["software_release"])
             else:
                 ServerInstalledSoftware.objects.create(
                     server_id=server_id,
                     software_id=entry.software_id,
-                    software_version=entry.software_version,
                     software_release=latest,
                 )
             if to_release and from_release != to_release:

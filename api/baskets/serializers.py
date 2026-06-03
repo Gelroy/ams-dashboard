@@ -4,9 +4,14 @@ from .models import Basket, BasketSoftware, ServerInstalledSoftware
 
 
 class BasketSoftwareSerializer(serializers.ModelSerializer):
+    """One pinned Software per basket. The version label that used to come
+    from SoftwareVersion now comes straight from Software.version, and
+    version_status from Software.status. The shape stays compatible with
+    the SPA's BasketSoftwareEntry type."""
+
     software_name = serializers.CharField(source="software.name", read_only=True)
-    version_label = serializers.CharField(source="software_version.version", read_only=True)
-    version_status = serializers.CharField(source="software_version.status", read_only=True)
+    version_label = serializers.CharField(source="software.version", read_only=True)
+    version_status = serializers.CharField(source="software.status", read_only=True)
     latest_release_id = serializers.SerializerMethodField()
     latest_release_name = serializers.SerializerMethodField()
 
@@ -16,7 +21,6 @@ class BasketSoftwareSerializer(serializers.ModelSerializer):
             "basket",
             "software",
             "software_name",
-            "software_version",
             "version_label",
             "version_status",
             "latest_release_id",
@@ -26,7 +30,7 @@ class BasketSoftwareSerializer(serializers.ModelSerializer):
 
     def _latest(self, obj):
         return next(
-            (r for r in obj.software_version.releases.all() if r.status == "Latest" and r.deleted_at is None),
+            (r for r in obj.software.releases.all() if r.status == "Latest" and r.deleted_at is None),
             None,
         )
 
@@ -50,7 +54,7 @@ class BasketSerializer(serializers.ModelSerializer):
 
 class ServerInstalledSoftwareSerializer(serializers.ModelSerializer):
     software_name = serializers.CharField(source="software.name", read_only=True)
-    version_label = serializers.CharField(source="software_version.version", read_only=True)
+    version_label = serializers.CharField(source="software.version", read_only=True)
     release_name = serializers.CharField(source="software_release.release_name", read_only=True)
 
     class Meta:
@@ -60,7 +64,6 @@ class ServerInstalledSoftwareSerializer(serializers.ModelSerializer):
             "server",
             "software",
             "software_name",
-            "software_version",
             "version_label",
             "software_release",
             "release_name",

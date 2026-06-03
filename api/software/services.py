@@ -16,7 +16,10 @@ def autocreate_executions_for_latest_release(release) -> list:
     release rolled out.
 
     Filters and semantics:
-      - The basket must pin the release's SoftwareVersion (BasketSoftware row).
+      - The basket must pin the release's Software (BasketSoftware row).
+        Pre-squash this matched on the (software, version) pair via
+        SoftwareVersion; the version layer is gone now, so a Software is
+        already a specific version.
       - The basket must have a PatchPlan linked to it (PatchPlan.basket FK).
         Baskets with no plan are skipped — we don't want to create a
         plan-less execution that has no steps.
@@ -43,11 +46,10 @@ def autocreate_executions_for_latest_release(release) -> list:
     )
     from patching.services import snapshot_steps_from_plan
 
-    version = release.software_version
-
-    # Baskets pinning this version.
+    # Baskets pinning this release's software (which is itself a specific
+    # version after the squash).
     basket_softwares = BasketSoftware.objects.filter(
-        software_version=version,
+        software=release.software,
     ).select_related("basket")
 
     created: list = []

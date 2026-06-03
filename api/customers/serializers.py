@@ -207,13 +207,12 @@ class ServerSerializer(serializers.ModelSerializer):
                 "id": str(i.id),
                 "software": str(i.software_id),
                 "software_name": i.software.name,
-                "software_version": str(i.software_version_id),
-                "version_label": i.software_version.version,
+                "version_label": i.software.version,
                 "software_release": str(i.software_release_id) if i.software_release_id else None,
                 "release_name": i.software_release.release_name if i.software_release else None,
             }
             for i in obj.installed_software.select_related(
-                "software", "software_version", "software_release"
+                "software", "software_release"
             ).all()
         ]
 

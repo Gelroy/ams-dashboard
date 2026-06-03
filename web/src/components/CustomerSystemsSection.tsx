@@ -542,13 +542,12 @@ function InstalledRow({
   catalog: Software[]
   onChanged: () => void
 }) {
-  // Optimistic copies of the two editable fields. The controlled <select>s
-  // render from these immediately on change, so the user sees their pick
-  // stick instead of snapping back during the PATCH round-trip. The optimistic
-  // value is overwritten when `entry` arrives fresh from the parent's refresh
-  // (useEffect below). On PATCH failure we surface the error and roll the
-  // pending value back to whatever the server actually has.
-  const [pendingVersion, setPendingVersion] = useState(entry.software_version)
+  // Optimistic copy of the only editable field (release). The controlled
+  // <select> renders from this immediately on change so the user sees their
+  // pick stick instead of snapping back during the PATCH round-trip. The
+  // optimistic value is overwritten when `entry` arrives fresh from the
+  // parent's refresh (useEffect below). On PATCH failure we surface the
+  // error and roll back.
   const [pendingRelease, setPendingRelease] = useState<string | null>(
     entry.software_release ?? null,
   )
@@ -556,16 +555,17 @@ function InstalledRow({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setPendingVersion(entry.software_version)
     setPendingRelease(entry.software_release ?? null)
-  }, [entry.software_version, entry.software_release])
+  }, [entry.software_release])
 
+  // After the SoftwareVersion squash, a Software row IS a specific version,
+  // so its releases hang off the Software directly. The previous version
+  // dropdown has nothing left to choose between.
   const sw = catalog.find((s) => s.id === entry.software)
-  const versions = sw?.versions ?? []
-  const releases = versions.find((v) => v.id === pendingVersion)?.releases ?? []
+  const releases = sw?.releases ?? []
 
   const patch = (
-    body: { software_version?: string; software_release?: string | null },
+    body: { software_release?: string | null },
     optimistic: () => void,
     rollback: () => void,
   ) => {
@@ -584,33 +584,7 @@ function InstalledRow({
   return (
     <div className="release-row" style={{ flexWrap: 'wrap' }}>
       <strong style={{ width: 180 }}>{entry.software_name}</strong>
-      <select
-        className="input compact"
-        value={pendingVersion}
-        disabled={saving}
-        onChange={(e) => {
-          const newVersionId = e.target.value
-          const prevVersion = pendingVersion
-          const prevRelease = pendingRelease
-          patch(
-            { software_version: newVersionId, software_release: null },
-            () => {
-              setPendingVersion(newVersionId)
-              setPendingRelease(null)
-            },
-            () => {
-              setPendingVersion(prevVersion)
-              setPendingRelease(prevRelease)
-            },
-          )
-        }}
-      >
-        {versions.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.version}
-          </option>
-        ))}
-      </select>
+      <span className="meta" style={{ width: 80 }}>{entry.version_label}</span>
       <select
         className="input compact"
         value={pendingRelease ?? ''}
@@ -669,27 +643,25 @@ function AddInstalledForm({
 }) {
   const available = catalog.filter((s) => !existing.includes(s.id))
   const [softwareId, setSoftwareId] = useState('')
-  const [versionId, setVersionId] = useState('')
   const [releaseId, setReleaseId] = useState('')
   const [busy, setBusy] = useState(false)
 
+  // After the squash, picking a Software fully determines the version, so
+  // we go straight from Software → Release. One fewer dropdown.
   const sw = available.find((s) => s.id === softwareId)
-  const versions = sw?.versions ?? []
-  const releases = versions.find((v) => v.id === versionId)?.releases ?? []
+  const releases = sw?.releases ?? []
 
   if (available.length === 0) return null
 
   const submit = async () => {
-    if (!softwareId || !versionId) return
+    if (!softwareId) return
     setBusy(true)
     try {
       await addInstalledSoftware(orgId, serverId, {
         software: softwareId,
-        software_version: versionId,
         software_release: releaseId || null,
       })
       setSoftwareId('')
-      setVersionId('')
       setReleaseId('')
       onAdded()
     } finally {
@@ -704,37 +676,20 @@ function AddInstalledForm({
         value={softwareId}
         onChange={(e) => {
           setSoftwareId(e.target.value)
-          setVersionId('')
           setReleaseId('')
         }}
       >
         <option value="">— Software —</option>
         {available.map((s) => (
           <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </select>
-      <select
-        className="input compact"
-        value={versionId}
-        disabled={!softwareId}
-        onChange={(e) => {
-          setVersionId(e.target.value)
-          setReleaseId('')
-        }}
-      >
-        <option value="">— Version —</option>
-        {versions.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.version}
+            {s.name} {s.version}
           </option>
         ))}
       </select>
       <select
         className="input compact"
         value={releaseId}
-        disabled={!versionId}
+        disabled={!softwareId}
         onChange={(e) => setReleaseId(e.target.value)}
       >
         <option value="">— Release —</option>
@@ -744,7 +699,7 @@ function AddInstalledForm({
           </option>
         ))}
       </select>
-      <button className="btn" disabled={busy || !softwareId || !versionId} onClick={submit}>
+      <button className="btn" disabled={busy || !softwareId} onClick={submit}>
         + Record
       </button>
     </div>

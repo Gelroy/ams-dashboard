@@ -114,32 +114,29 @@ export interface Server {
 export type EditableServerFields = Pick<Server, 'name' | 'ip_address' | 'notes' | 'cert_expires_on'>
 
 export type LifecycleStatus = 'Latest' | 'Supported' | 'EOL'
-// Back-compat alias used by existing imports.
+// Back-compat alias kept for callers that still want a "status type" name —
+// the middle SoftwareVersion layer was squashed into Software, so what used
+// to be "version status" is now "software status".
 export type SoftwareVersionStatus = LifecycleStatus
 
 export interface SoftwareRelease {
   id: string
-  software_version: string
+  software: string
   release_name: string
   released_on: string | null
   status: LifecycleStatus
   position: number
 }
 
-export interface SoftwareVersion {
-  id: string
-  software: string
-  version: string
-  status: LifecycleStatus
-  position: number
-  releases: SoftwareRelease[]
-}
-
 export interface Software {
   id: string
   name: string
+  // The version label that used to live on a SoftwareVersion child
+  // (e.g. "9.5.0") — now a field on Software itself.
+  version: string
+  status: LifecycleStatus
   description: string | null
-  versions: SoftwareVersion[]
+  releases: SoftwareRelease[]
 }
 
 export type NeedsPatchingStatus = 'yes' | 'no' | 'unknown'
@@ -148,7 +145,9 @@ export interface BasketSoftwareEntry {
   basket: string
   software: string
   software_name: string
-  software_version: string
+  // version_label / version_status are sourced from the parent Software
+  // row now (Software.version / Software.status), but the field names are
+  // kept stable so the SPA's existing display code keeps working.
   version_label: string
   version_status: LifecycleStatus
   latest_release_id: string | null
@@ -171,7 +170,7 @@ export interface ServerInstalledSoftwareEntry {
   id: string
   software: string
   software_name: string
-  software_version: string
+  // version_label is sourced from Software.version after the squash.
   version_label: string
   software_release: string | null
   release_name: string | null

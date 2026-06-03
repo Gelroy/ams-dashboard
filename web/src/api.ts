@@ -12,7 +12,6 @@ import type {
   ServerInstalledSoftwareEntry,
   Software,
   SoftwareRelease,
-  SoftwareVersion,
   SoftwareVersionStatus,
 } from './types'
 
@@ -252,16 +251,21 @@ export function listSoftware(): Promise<Software[]> {
   return request<Software[]>(`/software/`)
 }
 
-export function createSoftware(name: string): Promise<Software> {
+export function createSoftware(payload: {
+  name: string
+  version: string
+  status?: SoftwareVersionStatus
+  description?: string | null
+}): Promise<Software> {
   return request<Software>(`/software/`, {
     method: 'POST',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(payload),
   })
 }
 
 export function updateSoftware(
   id: string,
-  patch: Partial<Pick<Software, 'name' | 'description'>>,
+  patch: Partial<Pick<Software, 'name' | 'version' | 'status' | 'description'>>,
 ): Promise<Software> {
   return request<Software>(`/software/${id}/`, {
     method: 'PATCH',
@@ -273,34 +277,9 @@ export function deleteSoftware(id: string): Promise<void> {
   return request<void>(`/software/${id}/`, { method: 'DELETE' })
 }
 
-export function createVersion(
-  softwareId: string,
-  payload: { version: string; status: SoftwareVersionStatus; position: number },
-): Promise<SoftwareVersion> {
-  return request<SoftwareVersion>(`/software/${softwareId}/versions/`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-export function updateVersion(
-  softwareId: string,
-  versionId: string,
-  patch: Partial<Pick<SoftwareVersion, 'version' | 'status' | 'position'>>,
-): Promise<SoftwareVersion> {
-  return request<SoftwareVersion>(`/software/${softwareId}/versions/${versionId}/`, {
-    method: 'PATCH',
-    body: JSON.stringify(patch),
-  })
-}
-
-export function deleteVersion(softwareId: string, versionId: string): Promise<void> {
-  return request<void>(`/software/${softwareId}/versions/${versionId}/`, { method: 'DELETE' })
-}
-
+// Releases are direct children of Software now — no more /versions/ segment.
 export function createRelease(
   softwareId: string,
-  versionId: string,
   payload: {
     release_name: string
     released_on?: string | null
@@ -309,29 +288,24 @@ export function createRelease(
   },
 ): Promise<SoftwareRelease> {
   return request<SoftwareRelease>(
-    `/software/${softwareId}/versions/${versionId}/releases/`,
+    `/software/${softwareId}/releases/`,
     { method: 'POST', body: JSON.stringify(payload) },
   )
 }
 
 export function updateRelease(
   softwareId: string,
-  versionId: string,
   releaseId: string,
   patch: Partial<Pick<SoftwareRelease, 'release_name' | 'released_on' | 'status' | 'position'>>,
 ): Promise<SoftwareRelease> {
   return request<SoftwareRelease>(
-    `/software/${softwareId}/versions/${versionId}/releases/${releaseId}/`,
+    `/software/${softwareId}/releases/${releaseId}/`,
     { method: 'PATCH', body: JSON.stringify(patch) },
   )
 }
 
-export function deleteRelease(
-  softwareId: string,
-  versionId: string,
-  releaseId: string,
-): Promise<void> {
-  return request<void>(`/software/${softwareId}/versions/${versionId}/releases/${releaseId}/`, { method: 'DELETE' })
+export function deleteRelease(softwareId: string, releaseId: string): Promise<void> {
+  return request<void>(`/software/${softwareId}/releases/${releaseId}/`, { method: 'DELETE' })
 }
 
 // Baskets
@@ -362,7 +336,7 @@ export function deleteBasket(id: string): Promise<void> {
 
 export function addBasketSoftware(
   basketId: string,
-  payload: { software: string; software_version: string },
+  payload: { software: string },
 ): Promise<unknown> {
   return request(`/baskets/${basketId}/software/`, {
     method: 'POST',
@@ -370,16 +344,9 @@ export function addBasketSoftware(
   })
 }
 
-export function updateBasketSoftware(
-  basketId: string,
-  softwareId: string,
-  patch: { software_version: string },
-): Promise<unknown> {
-  return request(`/baskets/${basketId}/software/${softwareId}/`, {
-    method: 'PATCH',
-    body: JSON.stringify(patch),
-  })
-}
+// No updateBasketSoftware after the SoftwareVersion squash — a basket pin
+// is now just (basket, software) with no version dropdown to edit. To change
+// the version, swap the pinned Software (DELETE + POST).
 
 export function removeBasketSoftware(basketId: string, softwareId: string): Promise<void> {
   return request<void>(`/baskets/${basketId}/software/${softwareId}/`, { method: 'DELETE' })
@@ -416,7 +383,7 @@ export function listInstalledSoftware(
 export function addInstalledSoftware(
   orgId: string,
   serverId: string,
-  payload: { software: string; software_version: string; software_release?: string | null },
+  payload: { software: string; software_release?: string | null },
 ): Promise<ServerInstalledSoftwareEntry> {
   return request<ServerInstalledSoftwareEntry>(
     `/organizations/${orgId}/servers/${serverId}/installed/`,
@@ -428,7 +395,7 @@ export function updateInstalledSoftware(
   orgId: string,
   serverId: string,
   id: string,
-  patch: { software_version?: string; software_release?: string | null },
+  patch: { software_release?: string | null },
 ): Promise<ServerInstalledSoftwareEntry> {
   return request<ServerInstalledSoftwareEntry>(
     `/organizations/${orgId}/servers/${serverId}/installed/${id}/`,

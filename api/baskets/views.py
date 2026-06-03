@@ -18,13 +18,15 @@ from .services import copy_installed_software
 
 
 class BasketViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
-    queryset = Basket.objects.prefetch_related("software_entries__software_version__releases").all()
+    queryset = Basket.objects.prefetch_related("software_entries__software__releases").all()
     serializer_class = BasketSerializer
     pagination_class = None
 
 
 class BasketSoftwareViewSet(viewsets.ModelViewSet):
-    """Per-basket software pins. POST creates, PATCH updates the version, DELETE removes."""
+    """Per-basket software pins. POST creates, DELETE removes. No PATCH —
+    after the SoftwareVersion squash, a basket entry is simply (basket,
+    software) and there is no longer a version dropdown to edit."""
 
     serializer_class = BasketSoftwareSerializer
     pagination_class = None
@@ -32,7 +34,7 @@ class BasketSoftwareViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return BasketSoftware.objects.filter(basket_id=self.kwargs["basket_pk"]).select_related(
-            "software", "software_version"
+            "software"
         )
 
     def perform_create(self, serializer):
@@ -84,7 +86,7 @@ class ServerInstalledSoftwareViewSet(viewsets.ModelViewSet):
                 server_id=self.kwargs["server_pk"],
                 server__environment__organization_id=self.kwargs["organization_pk"],
             )
-            .select_related("software", "software_version", "software_release")
+            .select_related("software", "software_release")
             .order_by("software__name")
         )
 

@@ -1,10 +1,10 @@
 """Needs-Patching computation + ServerInstalledSoftware helpers.
 
 A server is "yes" (needs patching) if for any (basket, software) it is pinned to,
-its installed release for that software is not the Latest release in the basket's
-pinned version. "no" if all installed software matches Latest. "unknown" when
-there is not enough data (no baskets, no installed entries, or no Latest release
-declared yet).
+its installed release for that software is not the Latest release of the
+basket's pinned Software. "no" if all installed software matches Latest.
+"unknown" when there is not enough data (no baskets, no installed entries,
+or no Latest release declared yet).
 """
 from django.db import transaction
 
@@ -27,7 +27,6 @@ def copy_installed_software(source_server_id, dest_server_id) -> int:
             server_id=dest_server_id,
             software_id=entry.software_id,
             defaults={
-                "software_version": entry.software_version,
                 "software_release": entry.software_release,
             },
         )
@@ -46,9 +45,10 @@ def copy_server_details_to_env_peers(source_server) -> int:
     Implementation notes:
       - bulk_create() bypasses ServerBasket's post_save signal, which would
         otherwise auto-create ServerInstalledSoftware rows at the basket's
-        pinned-Latest release. We want the source server's *exact* installed
-        entries (which may pin a non-Latest release), so we wipe and re-bulk-
-        create the installed_software table for each peer immediately after.
+        Software-current Latest release. We want the source server's *exact*
+        installed entries (which may pin a non-Latest release), so we wipe
+        and re-bulk-create the installed_software table for each peer
+        immediately after.
       - Both deletes are hard deletes — these are M2M-style join rows, not
         soft-deletable user data.
     """
@@ -69,7 +69,7 @@ def copy_server_details_to_env_peers(source_server) -> int:
     )
     source_installed = list(
         ServerInstalledSoftware.objects.filter(server=source_server).values(
-            "software_id", "software_version_id", "software_release_id"
+            "software_id", "software_release_id"
         )
     )
 
@@ -90,7 +90,6 @@ def copy_server_details_to_env_peers(source_server) -> int:
                     ServerInstalledSoftware(
                         server=dest,
                         software_id=e["software_id"],
-                        software_version_id=e["software_version_id"],
                         software_release_id=e["software_release_id"],
                     )
                     for e in source_installed
@@ -101,9 +100,15 @@ def copy_server_details_to_env_peers(source_server) -> int:
 
 
 def server_needs_patching(server) -> str:
+    """Compare each pinned (basket → software) to the server's installed
+    release. After the SoftwareVersion squash a basket pins a Software
+    directly, so we no longer need to walk a version dropdown — the
+    'expected' release is just whatever release of that Software is
+    currently flagged Latest.
+    """
     baskets = (
         Basket.objects.filter(server_baskets__server=server, deleted_at__isnull=True)
-        .prefetch_related("software_entries__software_version__releases")
+        .prefetch_related("software_entries__software__releases")
         .distinct()
     )
     if not baskets.exists():
@@ -112,7 +117,7 @@ def server_needs_patching(server) -> str:
     installed_by_software = {
         i.software_id: i
         for i in ServerInstalledSoftware.objects.filter(server=server).select_related(
-            "software_version", "software_release"
+            "software", "software_release"
         )
     }
 
@@ -125,7 +130,7 @@ def server_needs_patching(server) -> str:
             latest = next(
                 (
                     r
-                    for r in entry.software_version.releases.all()
+                    for r in entry.software.releases.all()
                     if r.status == "Latest" and r.deleted_at is None
                 ),
                 None,
@@ -133,8 +138,6 @@ def server_needs_patching(server) -> str:
             if latest is None:
                 continue
             has_data = True
-            if installed.software_version_id != entry.software_version_id:
-                return "yes"
             if installed.software_release_id != latest.id:
                 return "yes"
 
@@ -161,7 +164,7 @@ def organization_patching_rollup(org) -> str:
       - "green"   : no known server needs patching
       - "unknown" : no servers, or every server is 'unknown' (no baskets
                     yet, or no Latest release declared on the basket's
-                    pinned version).
+                    pinned software).
 
     Unknown-status servers do not push the rollup toward red or green —
     only servers we can actually evaluate count.

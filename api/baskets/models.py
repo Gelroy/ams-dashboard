@@ -4,7 +4,7 @@ from django.db import models
 from django.db.models import Q
 
 from customers.models import Server, SoftDeleteModel
-from software.models import Software, SoftwareRelease, SoftwareVersion
+from software.models import Software, SoftwareRelease
 
 
 class Basket(SoftDeleteModel):
@@ -30,12 +30,12 @@ class Basket(SoftDeleteModel):
 
 
 class BasketSoftware(models.Model):
-    """Each basket pins one Version per Software. Release is dynamic — whichever release in
-    that version is currently flagged Latest."""
+    """Each basket pins one Software (which itself carries the version it
+    represents). Release is dynamic — whichever release of that Software is
+    currently flagged Latest."""
 
     basket = models.ForeignKey(Basket, on_delete=models.CASCADE, related_name="software_entries")
     software = models.ForeignKey(Software, on_delete=models.RESTRICT)
-    software_version = models.ForeignKey(SoftwareVersion, on_delete=models.RESTRICT)
 
     class Meta:
         db_table = "basket_software"
@@ -54,11 +54,15 @@ class ServerBasket(models.Model):
 
 
 class ServerInstalledSoftware(models.Model):
-    """What's actually running on a Server right now (per Software)."""
+    """What's actually running on a Server right now (per Software).
+
+    The release nails down the exact patch level; the Software's own version
+    field describes the major/minor stream. We don't store the version
+    explicitly here — it's reachable via server.installed.software.version.
+    """
 
     server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name="installed_software")
     software = models.ForeignKey(Software, on_delete=models.RESTRICT)
-    software_version = models.ForeignKey(SoftwareVersion, on_delete=models.RESTRICT)
     software_release = models.ForeignKey(
         SoftwareRelease, on_delete=models.RESTRICT, null=True, blank=True
     )

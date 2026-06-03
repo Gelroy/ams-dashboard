@@ -3,27 +3,21 @@ import { useEffect, useState } from 'react'
 import {
   createRelease,
   createSoftware,
-  createVersion,
   deleteRelease,
   deleteSoftware,
-  deleteVersion,
   listSoftware,
   updateRelease,
   updateSoftware,
-  updateVersion,
 } from '../api'
-import type {
-  Software,
-  SoftwareRelease,
-  SoftwareVersion,
-  SoftwareVersionStatus,
-} from '../types'
+import type { Software, SoftwareRelease, SoftwareVersionStatus } from '../types'
 
 const STATUSES: SoftwareVersionStatus[] = ['Latest', 'Supported', 'EOL']
 
-// Composing release names from a version + suffix.
-// "1.0" → prefix "1.0."     ; suffix "1" → "1.0.1"
-// "11.0.6.x" → prefix "11.0.6." (trailing wildcard stripped); suffix "13" → "11.0.6.13"
+// Composing release names from a version + suffix:
+//   "1.0" → prefix "1.0."     ; suffix "1" → "1.0.1"
+//   "11.0.6.x" → prefix "11.0.6." (trailing wildcard stripped); suffix "13" → "11.0.6.13"
+// After the SoftwareVersion squash the prefix is sourced from Software.version
+// instead of SoftwareVersion.version, but the shape of the helper is unchanged.
 function versionPrefix(versionLabel: string): string {
   const stripped = versionLabel.replace(/\.[xX*]$/, '').replace(/\.+$/, '')
   return stripped + '.'
@@ -80,6 +74,15 @@ export function VersionsPage() {
 function SoftwareCard({ software, onChanged }: { software: Software; onChanged: () => void }) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState(software.name)
+  const [version, setVersion] = useState(software.version)
+  const [error, setError] = useState<string | null>(null)
+
+  const patch = (p: Partial<Pick<Software, 'name' | 'version' | 'status'>>) => {
+    setError(null)
+    updateSoftware(software.id, p)
+      .then(onChanged)
+      .catch((e: Error) => setError(e.message))
+  }
 
   return (
     <div className="catalog-card">
@@ -92,82 +95,24 @@ function SoftwareCard({ software, onChanged }: { software: Software; onChanged: 
           value={name}
           onChange={(e) => setName(e.target.value)}
           onBlur={() => {
-            if (name !== software.name) updateSoftware(software.id, { name }).then(onChanged)
+            if (name !== software.name) patch({ name })
           }}
         />
-        <span className="meta">{software.versions.length} versions</span>
-        <button
-          className="btn-icon"
-          title="Delete software"
-          onClick={() => {
-            if (window.confirm(`Delete ${software.name} and all its versions/releases?`)) {
-              deleteSoftware(software.id).then(onChanged)
-            }
-          }}
-        >
-          ×
-        </button>
-      </div>
-
-      {open && (
-        <div className="catalog-children">
-          {software.versions.map((v) => (
-            <VersionCard
-              key={v.id}
-              softwareId={software.id}
-              version={v}
-              onChanged={onChanged}
-            />
-          ))}
-          <AddVersionForm
-            softwareId={software.id}
-            nextPosition={software.versions.length}
-            onAdded={onChanged}
-          />
-        </div>
-      )}
-    </div>
-  )
-}
-
-function VersionCard({
-  softwareId,
-  version,
-  onChanged,
-}: {
-  softwareId: string
-  version: SoftwareVersion
-  onChanged: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [vName, setVName] = useState(version.version)
-  const [error, setError] = useState<string | null>(null)
-
-  const patch = (p: Partial<SoftwareVersion>) => {
-    setError(null)
-    updateVersion(softwareId, version.id, p)
-      .then(onChanged)
-      .catch((e: Error) => setError(e.message))
-  }
-
-  return (
-    <div className="catalog-card nested">
-      <div className="catalog-row">
-        <button className="chevron-btn" onClick={() => setOpen(!open)}>
-          {open ? '▼' : '▶'}
-        </button>
+        {/* Version moved from the (deleted) child layer onto Software
+            itself — same input, just one row up. */}
         <input
           className="input compact"
-          style={{ width: 100 }}
-          value={vName}
-          onChange={(e) => setVName(e.target.value)}
+          style={{ width: 110 }}
+          value={version}
+          placeholder="version"
+          onChange={(e) => setVersion(e.target.value)}
           onBlur={() => {
-            if (vName !== version.version) patch({ version: vName })
+            if (version !== software.version) patch({ version })
           }}
         />
         <select
           className="input compact"
-          value={version.status}
+          value={software.status}
           onChange={(e) => patch({ status: e.target.value as SoftwareVersionStatus })}
         >
           {STATUSES.map((s) => (
@@ -176,13 +121,15 @@ function VersionCard({
             </option>
           ))}
         </select>
-        <span className="meta">{version.releases.length} releases</span>
+        <span className="meta">
+          {software.releases.length} release{software.releases.length === 1 ? '' : 's'}
+        </span>
         <button
           className="btn-icon"
-          title="Delete version"
+          title="Delete software"
           onClick={() => {
-            if (window.confirm(`Delete version ${version.version}?`)) {
-              deleteVersion(softwareId, version.id).then(onChanged)
+            if (window.confirm(`Delete ${software.name} and all its releases?`)) {
+              deleteSoftware(software.id).then(onChanged)
             }
           }}
         >
@@ -193,21 +140,19 @@ function VersionCard({
 
       {open && (
         <div className="catalog-children">
-          {version.releases.map((r) => (
+          {software.releases.map((r) => (
             <ReleaseRow
               key={r.id}
-              softwareId={softwareId}
-              versionLabel={version.version}
-              versionId={version.id}
+              softwareId={software.id}
+              versionLabel={software.version}
               release={r}
               onChanged={onChanged}
             />
           ))}
           <AddReleaseForm
-            softwareId={softwareId}
-            versionLabel={version.version}
-            versionId={version.id}
-            nextPosition={version.releases.length}
+            softwareId={software.id}
+            versionLabel={software.version}
+            nextPosition={software.releases.length}
             onAdded={onChanged}
           />
         </div>
@@ -219,13 +164,11 @@ function VersionCard({
 function ReleaseRow({
   softwareId,
   versionLabel,
-  versionId,
   release,
   onChanged,
 }: {
   softwareId: string
   versionLabel: string
-  versionId: string
   release: SoftwareRelease
   onChanged: () => void
 }) {
@@ -243,9 +186,7 @@ function ReleaseRow({
         onBlur={() => {
           const composed = composeReleaseName(versionLabel, suffix)
           if (composed !== release.release_name)
-            updateRelease(softwareId, versionId, release.id, { release_name: composed }).then(
-              onChanged,
-            )
+            updateRelease(softwareId, release.id, { release_name: composed }).then(onChanged)
         }}
       />
       <input
@@ -253,7 +194,7 @@ function ReleaseRow({
         className="input compact"
         value={release.released_on ?? ''}
         onChange={(e) =>
-          updateRelease(softwareId, versionId, release.id, {
+          updateRelease(softwareId, release.id, {
             released_on: e.target.value || null,
           }).then(onChanged)
         }
@@ -262,7 +203,7 @@ function ReleaseRow({
         className="input compact"
         value={release.status}
         onChange={(e) =>
-          updateRelease(softwareId, versionId, release.id, {
+          updateRelease(softwareId, release.id, {
             status: e.target.value as SoftwareVersionStatus,
           }).then(onChanged)
         }
@@ -279,7 +220,7 @@ function ReleaseRow({
         title="Delete release"
         onClick={() => {
           if (window.confirm(`Delete release ${release.release_name}?`))
-            deleteRelease(softwareId, versionId, release.id).then(onChanged)
+            deleteRelease(softwareId, release.id).then(onChanged)
         }}
       >
         ×
@@ -290,58 +231,18 @@ function ReleaseRow({
 
 function AddSoftwareForm({ onAdded }: { onAdded: () => void }) {
   const [name, setName] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  const submit = async () => {
-    if (!name.trim()) return
-    setBusy(true)
-    try {
-      await createSoftware(name.trim())
-      setName('')
-      onAdded()
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="add-row">
-      <input
-        className="input compact"
-        placeholder="New software name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') submit()
-        }}
-      />
-      <button className="btn" disabled={busy || !name.trim()} onClick={submit}>
-        + Add Software
-      </button>
-    </div>
-  )
-}
-
-function AddVersionForm({
-  softwareId,
-  nextPosition,
-  onAdded,
-}: {
-  softwareId: string
-  nextPosition: number
-  onAdded: () => void
-}) {
   const [version, setVersion] = useState('')
   const [status, setStatus] = useState<SoftwareVersionStatus>('Supported')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const submit = async () => {
-    if (!version.trim()) return
+    if (!name.trim() || !version.trim()) return
     setBusy(true)
     setError(null)
     try {
-      await createVersion(softwareId, { version: version.trim(), status, position: nextPosition })
+      await createSoftware({ name: name.trim(), version: version.trim(), status })
+      setName('')
       setVersion('')
       setStatus('Supported')
       onAdded()
@@ -356,7 +257,17 @@ function AddVersionForm({
     <div className="add-row">
       <input
         className="input compact"
-        placeholder="Version (e.g. 1.0)"
+        placeholder="New software name (e.g. Websphere v9.5)"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') submit()
+        }}
+      />
+      <input
+        className="input compact"
+        style={{ width: 120 }}
+        placeholder="Version (e.g. 9.5.0)"
         value={version}
         onChange={(e) => setVersion(e.target.value)}
         onKeyDown={(e) => {
@@ -374,8 +285,8 @@ function AddVersionForm({
           </option>
         ))}
       </select>
-      <button className="btn" disabled={busy || !version.trim()} onClick={submit}>
-        + Add Version
+      <button className="btn" disabled={busy || !name.trim() || !version.trim()} onClick={submit}>
+        + Add Software
       </button>
       {error && <span className="error-text">{error}</span>}
     </div>
@@ -385,13 +296,11 @@ function AddVersionForm({
 function AddReleaseForm({
   softwareId,
   versionLabel,
-  versionId,
   nextPosition,
   onAdded,
 }: {
   softwareId: string
   versionLabel: string
-  versionId: string
   nextPosition: number
   onAdded: () => void
 }) {
@@ -406,7 +315,7 @@ function AddReleaseForm({
     if (!trimmed) return
     setBusy(true)
     try {
-      await createRelease(softwareId, versionId, {
+      await createRelease(softwareId, {
         release_name: composeReleaseName(versionLabel, trimmed),
         released_on: date || null,
         status,
