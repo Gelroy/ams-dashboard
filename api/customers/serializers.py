@@ -18,6 +18,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
     patching_status = serializers.SerializerMethodField()
     cert_status = serializers.SerializerMethodField()
     zabbix_status_rollup = serializers.SerializerMethodField()
+    primary_basket_softwares = serializers.SerializerMethodField()
 
     class Meta:
         model = Organization
@@ -34,6 +35,8 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "help_desk_phone",
             "roadmap",
             "notes",
+            "primary_basket",
+            "primary_basket_softwares",
             "open_ticket_count",
             "automated_ticket_count",
             "manual_ticket_count",
@@ -52,6 +55,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "jira_org_id",
             "jira_name",
             "display_name",
+            "primary_basket_softwares",
             "documents",
             "sme_staff",
             "open_ticket_count",
@@ -64,6 +68,26 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "patching_status",
             "cert_status",
             "zabbix_status_rollup",
+        ]
+
+    def get_primary_basket_softwares(self, obj):
+        """Inline the basket's softwares so the SPA renders the at-a-glance
+        list without an extra round-trip. Empty list when no primary basket
+        is set; basket itself may have zero softwares (also fine)."""
+        basket = obj.primary_basket
+        if basket is None or basket.deleted_at is not None:
+            return []
+        # BasketSoftware → software M2M-ish join. After the SoftwareVersion
+        # squash a Software row IS its version, so we expose version + status
+        # alongside the name for the customer-detail summary.
+        return [
+            {
+                "id": str(entry.software.id),
+                "name": entry.software.name,
+                "version": entry.software.version,
+                "status": entry.software.status,
+            }
+            for entry in basket.software_entries.select_related("software").all()
         ]
 
     def get_sme_staff(self, obj):

@@ -17,6 +17,13 @@ export interface SmeStaffRef {
   phone: string | null
 }
 
+export interface PrimaryBasketSoftware {
+  id: string
+  name: string
+  version: string
+  status: LifecycleStatus
+}
+
 export interface Organization {
   id: string
   jira_org_id: string
@@ -30,6 +37,11 @@ export interface Organization {
   help_desk_phone: string | null
   roadmap: string | null
   notes: string | null
+  // The team's at-a-glance reference stack for this customer. The FK is
+  // editable; primary_basket_softwares is a server-derived snapshot of
+  // the basket's contents so the SPA renders the chip list inline.
+  primary_basket: string | null
+  primary_basket_softwares: PrimaryBasketSoftware[]
   open_ticket_count: number | null
   automated_ticket_count: number | null
   manual_ticket_count: number | null
@@ -78,6 +90,7 @@ export type EditableOrgFields = Pick<
   | 'help_desk_phone'
   | 'roadmap'
   | 'notes'
+  | 'primary_basket'
 >
 
 export type EditableUserFields = Pick<

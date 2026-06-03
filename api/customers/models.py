@@ -65,6 +65,18 @@ class Organization(SoftDeleteModel):
     # from forward-looking plans.
     roadmap = models.TextField(null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
+    # The team's at-a-glance summary of the software stack this customer
+    # runs. Distinct from per-server Basket assignment — this is the
+    # *expected* baseline. Optional; left null on customers without a
+    # canonical primary stack. SET_NULL on basket delete so a removed
+    # basket doesn't cascade-delete the customer.
+    primary_basket = models.ForeignKey(
+        "baskets.Basket",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="primary_for_organizations",
+    )
     open_ticket_count = models.IntegerField(null=True, blank=True)
     # Split of open_ticket_count: tickets assigned to an "*Alert*" user
     # (automated/monitoring origin) vs everything else (manual / human-

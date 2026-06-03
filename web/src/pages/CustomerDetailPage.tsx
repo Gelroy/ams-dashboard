@@ -5,6 +5,7 @@ import {
   createOrgDocument,
   deleteOrgDocument,
   getOrganization,
+  listBaskets,
   listOrgUsers,
   listPatchHistory,
   updateOrganization,
@@ -15,6 +16,7 @@ import { CustomerAnalyticsSection } from '../components/CustomerAnalyticsSection
 import { CustomerSystemsSection } from '../components/CustomerSystemsSection'
 import type {
   AmsLevel,
+  Basket,
   Country,
   EditableOrgFields,
   Organization,
@@ -29,6 +31,7 @@ export function CustomerDetailPage() {
   const { id = '' } = useParams<{ id: string }>()
   const [org, setOrg] = useState<Organization | null>(null)
   const [users, setUsers] = useState<OrgUser[]>([])
+  const [baskets, setBaskets] = useState<Basket[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -36,11 +39,14 @@ export function CustomerDetailPage() {
     let cancelled = false
     setLoading(true)
     setError(null)
-    Promise.all([getOrganization(id), listOrgUsers(id)])
-      .then(([orgData, usersData]) => {
+    // listBaskets is small and shared — fetched once with the org so the
+    // Primary Basket dropdown is populated alongside everything else.
+    Promise.all([getOrganization(id), listOrgUsers(id), listBaskets()])
+      .then(([orgData, usersData, basketsData]) => {
         if (cancelled) return
         setOrg(orgData)
         setUsers(usersData.results)
+        setBaskets(basketsData)
       })
       .catch((e: Error) => {
         if (cancelled) return
@@ -72,7 +78,7 @@ export function CustomerDetailPage() {
       </div>
 
       <CollapsibleSection title="Details">
-        <DetailsSection org={org} onUpdated={setOrg} />
+        <DetailsSection org={org} baskets={baskets} onUpdated={setOrg} />
       </CollapsibleSection>
       <CollapsibleSection title="Customer Systems">
         <CustomerSystemsSection orgId={id} />
@@ -129,9 +135,11 @@ function CollapsibleSection({
 
 function DetailsSection({
   org,
+  baskets,
   onUpdated,
 }: {
   org: Organization
+  baskets: Basket[]
   onUpdated: (o: Organization) => void
 }) {
   const [draft, setDraft] = useState<EditableOrgFields>({
@@ -143,6 +151,7 @@ function DetailsSection({
     help_desk_phone: org.help_desk_phone,
     roadmap: org.roadmap,
     notes: org.notes,
+    primary_basket: org.primary_basket,
   })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -248,6 +257,18 @@ function DetailsSection({
               ))}
             </div>
           )}
+        </Field>
+        <Field label="Primary Basket" wide>
+          <PrimaryBasketField
+            value={draft.primary_basket}
+            baskets={baskets}
+            // primary_basket_softwares is server-derived from the FK, so
+            // we render it straight from the org's current snapshot. Stale
+            // until Save → refetch updates it; that's a known small lag,
+            // not worth a separate fetch.
+            softwares={org.primary_basket_softwares}
+            onChange={(v) => set('primary_basket', v)}
+          />
         </Field>
         <ExpandableField
           label="Roadmap"
@@ -883,6 +904,55 @@ function Field({
     <div className={wide ? 'field field-wide' : 'field'}>
       <div className="field-label">{label}</div>
       <div className="field-control">{children}</div>
+    </div>
+  )
+}
+
+/** Primary Basket dropdown + the basket's softwares preview. The softwares
+ *  list is rendered from the org's server-derived snapshot, so it lags by
+ *  one Save round-trip when the user picks a different basket — until they
+ *  click Save the dropdown reflects the draft choice but the list still
+ *  shows the previously-saved basket's contents. Acceptable tradeoff vs
+ *  fetching basket details on every dropdown change. */
+function PrimaryBasketField({
+  value,
+  baskets,
+  softwares,
+  onChange,
+}: {
+  value: string | null | undefined
+  baskets: Basket[]
+  softwares: Organization['primary_basket_softwares']
+  onChange: (next: string | null) => void
+}) {
+  return (
+    <div>
+      <select
+        className="input"
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value || null)}
+      >
+        <option value="">— Not set —</option>
+        {baskets.map((b) => (
+          <option key={b.id} value={b.id}>
+            {b.name}
+          </option>
+        ))}
+      </select>
+      {value && softwares.length === 0 && (
+        <div className="meta" style={{ marginTop: 6 }}>
+          This basket has no software pinned yet.
+        </div>
+      )}
+      {softwares.length > 0 && (
+        <div className="env-chips" style={{ marginTop: 6 }}>
+          {softwares.map((s) => (
+            <span key={s.id} className="env-chip" title={`Status: ${s.status}`}>
+              {s.name} {s.version}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
