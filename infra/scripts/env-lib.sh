@@ -62,6 +62,12 @@ build_context_flags() {
   if [[ "${JIRA_SYNC_ENABLED:-true}" == "false" ]]; then
     CONTEXT_FLAGS+=(-c jira_sync_enabled=false)
   fi
+  if [[ -n "${AURORA_AUTO_PAUSE_MINUTES:-}" && "${AURORA_AUTO_PAUSE_MINUTES}" != "0" ]]; then
+    CONTEXT_FLAGS+=(-c "aurora_auto_pause_minutes=$AURORA_AUTO_PAUSE_MINUTES")
+  fi
+  if [[ -n "${API_DESIRED_COUNT:-}" ]]; then
+    CONTEXT_FLAGS+=(-c "api_desired_count=$API_DESIRED_COUNT")
+  fi
 }
 
 # Log group name must mirror infra_stack.py's name_suffix rule.

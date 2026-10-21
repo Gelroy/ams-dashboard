@@ -248,6 +248,19 @@ aws cognito-idp admin-add-user-to-group --profile default --region us-east-1 \
   --user-pool-id us-east-1_cxYACb709 --username <you@example.com> --group-name admin
 ```
 
+### Cost (2026-10-21)
+
+Running 24/7 the clone is ~$85/mo at list price: Aurora 0.5 ACU floor
+~$44, ALB ~$17, three public IPv4 addresses ~$11, Fargate task ~$9,
+logs/secrets/ECR ~$4. Applied: **Aurora auto-pause** after 15 idle
+minutes (`AURORA_AUTO_PAUSE_MINUTES=15` in `personal-dev.env`, min
+capacity 0 ACU, ~15 s resume on the first query) → roughly $40–45/mo
+when lightly used. Available but not applied: `API_DESIRED_COUNT=0`
+parks the API task (saves ~$13; ALB still bills ~$25 as the floor).
+The ALB stays because it terminates TLS with the wildcard cert, gives
+a stable DNS target, and will host-route the portal hostname in Phase 1
+— replacing it with API Gateway would save ~$20 but diverge from prod.
+
 **Next:** Phase 1 (customer Cognito pool with MFA, `PortalAccount`,
 Invite-to-Portal, dual-issuer JWT auth, portal SPA shell at
 `portal.ams-dev.getshaking.live`, isolation tests).

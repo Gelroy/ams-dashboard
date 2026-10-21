@@ -787,6 +787,8 @@ A single class that wires up the entire application. Major sections, in order:
 | `hosted_zone_id` | string | – | Route53 zone that owns `domain_name` |
 | `hosted_zone_name` | string | – | That zone's name |
 | `jira_sync_enabled` | bool | `true` | `false` skips the three scheduled JIRA sync tasks (synthetic-data environments) |
+| `aurora_auto_pause_minutes` | int | `0` | 5–1440: Aurora min capacity 0 ACU + auto-pause after that many idle minutes (dev cost lever) |
+| `api_desired_count` | int | `1` | Number of API tasks; `0` parks the environment |
 
 ---
 
@@ -1111,9 +1113,9 @@ Approximate steady-state monthly cost for the current configuration (low-traffic
 
 | Idea | Saving | Trade-off |
 |---|---|---|
-| Aurora SLv2 min capacity 0.5 → 0 (auto-pause) | up to $40 when idle | ~15s cold-start latency on first request |
+| Aurora SLv2 min capacity 0.5 → 0 (auto-pause) | up to $40 when idle | ~15s cold-start latency on first request. **Implemented** as `-c aurora_auto_pause_minutes=N` (on in `personal-dev`, off in prod) |
 | RDS Postgres `db.t4g.micro` single-AZ instead of Aurora | ~$30 | No auto-failover, manual scaling |
-| Schedule API task to desired=0 outside work hours | ~$10 | Cold-start delay on first hit |
+| Schedule API task to desired=0 outside work hours | ~$10 | Cold-start delay on first hit. `-c api_desired_count=0` parks an environment by hand |
 | WAF rate-limiting | -$5+ | Adds cost |
 | HTTPS via CloudFront instead of ALB cert | similar | More complex routing |
 

@@ -86,6 +86,15 @@ Optional context:
                               real JIRA tenant.
   - stack_name              : (read by app.py) CloudFormation stack name,
                               default 'AmsDashboardStack'.
+  - aurora_auto_pause_minutes : 0 (default) keeps the 0.5 ACU floor. Any
+                              value 5–1440 sets the minimum to 0 ACU and
+                              lets Aurora pause the cluster after that many
+                              idle minutes (~$0 while paused; first query
+                              after a pause waits ~15 s). Cost lever for
+                              dev environments; leave 0 for prod.
+  - api_desired_count       : number of API tasks (default 1). 0 stops the
+                              API entirely (ALB keeps billing) — a cheap
+                              way to park a dev environment for weeks.
 
 Per-environment resource names: ``environment`` other than 'prod' is
 appended to the Cognito pool name and the CloudWatch log group names
@@ -193,6 +202,12 @@ class AmsDashboardStack(cdk.Stack):
         # untouched; every other environment gets a suffix so a second copy
         # of this stack can coexist alongside it.
         name_suffix = "" if environment == "prod" else f"-{environment}"
+        auto_pause_minutes = int(self.node.try_get_context("aurora_auto_pause_minutes") or 0)
+        if auto_pause_minutes and not 5 <= auto_pause_minutes <= 1440:
+            raise ValueError("aurora_auto_pause_minutes must be 0 (off) or between 5 and 1440.")
+        api_desired_count = int(self.node.try_get_context("api_desired_count") or 1)
+        if api_desired_count < 0:
+            raise ValueError("api_desired_count must be 0 or more.")
         extra_tags_raw = self.node.try_get_context("tags") or "{}"
         try:
             extra_tags = json.loads(extra_tags_raw) if isinstance(extra_tags_raw, str) else extra_tags_raw
@@ -371,8 +386,16 @@ class AmsDashboardStack(cdk.Stack):
                 version=rds.AuroraPostgresEngineVersion.VER_16_11
             ),
             writer=rds.ClusterInstance.serverless_v2("Writer"),
-            serverless_v2_min_capacity=0.5,
+            # Auto-pause (min 0 ACU) is the single biggest cost lever for a
+            # low-traffic environment: the 0.5 ACU floor alone is ~$44/mo.
+            # Only enabled per environment via aurora_auto_pause_minutes.
+            serverless_v2_min_capacity=0 if auto_pause_minutes else 0.5,
             serverless_v2_max_capacity=2.0,
+            **(
+                {"serverless_v2_auto_pause_duration": Duration.minutes(auto_pause_minutes)}
+                if auto_pause_minutes
+                else {}
+            ),
             vpc=vpc,
             vpc_subnets=private_subnets,
             security_groups=[db_sg],
@@ -537,7 +560,9 @@ class AmsDashboardStack(cdk.Stack):
             cluster=cluster,
             cpu=256,
             memory_limit_mib=512,
-            desired_count=1,
+            # The pattern construct refuses 0; parked environments get 0
+            # via a property override just below.
+            desired_count=max(api_desired_count, 1),
             public_load_balancer=public_alb,
             task_subnets=task_subnets,
             assign_public_ip=task_assign_public_ip,
@@ -570,6 +595,8 @@ class AmsDashboardStack(cdk.Stack):
         api_service.target_group.configure_health_check(
             path="/health", healthy_http_codes="200"
         )
+        if api_desired_count == 0:
+            api_service.service.node.default_child.add_property_override("DesiredCount", 0)
         db_cluster.connections.allow_default_port_from(api_service.service)
 
         # ── VPC endpoints (optional, when the VPC has no NAT/IGW egress) ──

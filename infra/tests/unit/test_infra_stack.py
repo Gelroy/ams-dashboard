@@ -24,6 +24,7 @@ DOMAIN_CONTEXT = {
     "hosted_zone_id": "Z0000000000000000000A",
     "hosted_zone_name": "example.com",
     "jira_sync_enabled": "false",
+    "aurora_auto_pause_minutes": "15",
 }
 
 
@@ -62,6 +63,13 @@ def test_prod_without_cert_serves_http_only(prod_template):
     prod_template.resource_count_is("AWS::Route53::RecordSet", 0)
     prod_template.has_resource_properties(
         "AWS::ElasticLoadBalancingV2::Listener", {"Port": 80, "Protocol": "HTTP"}
+    )
+
+
+def test_prod_aurora_keeps_half_acu_floor(prod_template):
+    prod_template.has_resource_properties(
+        "AWS::RDS::DBCluster",
+        {"ServerlessV2ScalingConfiguration": {"MinCapacity": 0.5, "MaxCapacity": 2}},
     )
 
 
@@ -143,6 +151,29 @@ def test_dev_passes_csrf_origin_to_containers(dev_template):
             )
         },
     )
+
+
+def test_dev_aurora_auto_pauses_after_15_minutes(dev_template):
+    dev_template.has_resource_properties(
+        "AWS::RDS::DBCluster",
+        {
+            "ServerlessV2ScalingConfiguration": {
+                "MinCapacity": 0,
+                "MaxCapacity": 2,
+                "SecondsUntilAutoPause": 900,
+            }
+        },
+    )
+
+
+def test_api_desired_count_is_configurable():
+    template = synth({**DOMAIN_CONTEXT, "api_desired_count": "0"}, stack_name="Parked")
+    template.has_resource_properties("AWS::ECS::Service", {"DesiredCount": 0})
+
+
+def test_auto_pause_minutes_validated():
+    with pytest.raises(ValueError, match="aurora_auto_pause_minutes"):
+        synth({"create_vpc": "true", "aurora_auto_pause_minutes": "2"})
 
 
 def test_dev_has_no_jira_sync_schedules(dev_template):

@@ -39,3 +39,10 @@ README*
 infra/.venv
 infra/cdk.out
 infra/tests
+
+# Not part of the image: changing these must not re-hash/rebuild it
+docs
+infra
+db
+tabbed-app.html
+README.md

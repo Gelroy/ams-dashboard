@@ -18,6 +18,8 @@ the company account (or vice versa).
 | `ACM_CERT_ARN` | Pre-issued certificate (optional; overrides issuing one) |
 | `DOMAIN_NAME` / `HOSTED_ZONE_ID` / `HOSTED_ZONE_NAME` | Issue a cert + create the DNS alias (see stack docstring) |
 | `JIRA_SYNC_ENABLED` | `false` disables the scheduled JIRA sync tasks |
+| `AURORA_AUTO_PAUSE_MINUTES` | `0` keeps the 0.5 ACU floor; 5–1440 lets Aurora pause to 0 ACU after that many idle minutes |
+| `API_DESIRED_COUNT` | API tasks to run; `0` parks the environment |
 
 Files are plain `KEY=value` lines (sourced by bash) — no quotes needed, no
 secrets allowed.
