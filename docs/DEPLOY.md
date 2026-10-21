@@ -117,6 +117,52 @@ cdk deploy \
 If `acm_cert_arn` is omitted, the ALB serves plain HTTP for the initial
 smoke-test. Add the cert and re-deploy for HTTPS.
 
+## Environments and the deploy guard
+
+Every deploy targets a named environment file in `infra/environments/`
+(`prod.env` for the company account, `personal-dev.env` for the Customer
+Portal skunkworks clone — see `docs/CUSTOMER_PORTAL.md`). The file fixes
+the AWS profile, account, region, stack name, and the cdk context flags
+that must stay identical between deploys.
+
+```bash
+./infra/scripts/deploy.sh --env prod            # company stack (default)
+./infra/scripts/deploy.sh --env personal-dev    # skunkworks clone
+./infra/scripts/deploy.sh --env prod --diff     # cdk diff, no changes
+./infra/scripts/deploy.sh --env prod --yes      # non-interactive
+```
+
+**Guard:** before cdk runs, `infra/scripts/env-lib.sh` resolves the
+profile's identity with `aws sts get-caller-identity` and refuses to
+continue unless the account matches `AWS_ACCOUNT_ID` in the environment
+file. A stale `AWS_PROFILE`, a mistyped `--env`, or credentials for the
+wrong account all stop there. `run-task.sh` applies the same check.
+
+Environments other than `prod` get their name appended to the physical
+resource names the stack chooses itself (Cognito pool
+`ams-dashboard-<env>`, log groups `/ams-dashboard-<env>/…`) so a second
+copy can share an account+region with the company stack.
+
+**Custom domain + HTTPS:** set `DOMAIN_NAME`, `HOSTED_ZONE_ID` and
+`HOSTED_ZONE_NAME` in the environment file and the stack issues a
+DNS-validated ACM certificate (apex + wildcard) in the zone and creates
+the alias record at the ALB. No `ACM_CERT_ARN` or `ALLOW_PUBLIC_HTTP`
+needed. For the company stack the certificate is still pre-issued and
+passed as `ACM_CERT_ARN`, because `infomagnetics.com` is not hosted in a
+Route53 zone CDK can write to.
+
+**One-off `manage.py` commands** (migrations, seeding) run inside the
+stack through the migration task definition, with the API service's
+network settings copied automatically:
+
+```bash
+./infra/scripts/run-task.sh --env personal-dev migrate
+./infra/scripts/run-task.sh --env personal-dev seed_synthetic
+```
+
+The script waits for the task, prints its CloudWatch log lines and exits
+with the container's exit code.
+
 ## One-time setup
 
 ```bash
@@ -131,6 +177,20 @@ pip install -r requirements.txt
 #    needs broad permissions — typically AdministratorAccess for the
 #    duration of the bootstrap.
 cdk bootstrap aws://<ACCOUNT>/<REGION>
+```
+
+The stack uses the bootstrap qualifier `amsdash01` (set in `cdk.json`),
+so a plain `cdk bootstrap` is not enough. Run it from a directory that
+has **no** `cdk.json` (otherwise the CLI synthesizes the app, finds no
+stack, and quietly does nothing) and give the toolkit its own stack name
+so an existing default-qualifier `CDKToolkit` in the account is left
+alone:
+
+```bash
+cd /tmp && cdk bootstrap aws://<ACCOUNT>/<REGION> \
+  --qualifier amsdash01 \
+  --toolkit-stack-name AmsDashboardCdkToolkit \
+  --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
 ```
 
 ### Alternative #1: bootstrap via AWS CLI + a CloudFormation template

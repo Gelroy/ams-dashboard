@@ -1,71 +1,52 @@
 #!/usr/bin/env bash
-# One-line deploy wrapper for the AMS Dashboard stack.
+# Deploy wrapper for the AMS Dashboard stack.
 #
-# Why this exists: cdk deploy needs three pieces of context to match the
-# currently-running prod stack, and forgetting any of them silently
-# changes infrastructure on the next deploy:
-#   - create_vpc=true        the stack provisions its own VPC; without
-#                            this flag synth refuses to produce a stack.
-#   - public_alb=true        keep the ALB internet-facing so teammates
-#                            can reach it without VPN. Without this it
-#                            falls back to internal scheme and the DNS
-#                            stops resolving from outside the VPC, which
-#                            already locked us out once (June 2026).
-#   - allow_public_http=true required while we're on plain HTTP (no ACM
-#                            cert wired up yet); the stack refuses
-#                            public_alb without it as a guardrail.
+# Every deploy targets a named environment from infra/environments/*.env,
+# which fixes the profile, account, region, stack name and the cdk context
+# flags that must be identical from one deploy to the next (forgetting any
+# of them silently changes infrastructure). Before anything runs, the
+# active profile's account is checked against the file — see env-lib.sh.
 #
 # Usage:
-#   ./infra/scripts/deploy.sh                  # interactive — confirms before apply
-#   ./infra/scripts/deploy.sh --yes            # auto-approve (CI / hands-off)
-#   ./infra/scripts/deploy.sh -- --hotswap     # forward extra flags to cdk
+#   ./infra/scripts/deploy.sh --env prod                 # company (default)
+#   ./infra/scripts/deploy.sh --env personal-dev         # skunkworks clone
+#   ./infra/scripts/deploy.sh --env personal-dev --diff  # cdk diff only
+#   ./infra/scripts/deploy.sh --env prod --yes           # auto-approve
+#   ./infra/scripts/deploy.sh --env prod -- --hotswap    # extra cdk flags
 #
-# Environment knobs (override on the command line, not by editing this file):
-#   AWS_PROFILE   default: ams-admin
-#   AWS_REGION    default: us-west-2
-#   STACK         default: AmsDashboardStack
-#   ACM_CERT_ARN  optional. If set, swaps HTTP-public for HTTPS-public and
-#                 drops the allow_public_http=true guardrail override.
+# Overrides (command line only, never by editing the env file in place):
+#   ACM_CERT_ARN=arn:…   swap HTTP-public for HTTPS with a pre-issued cert.
+#   DEPLOY_ENV=<name>    same as --env.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$REPO_ROOT/infra"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/infra/scripts/env-lib.sh"
 
-: "${AWS_PROFILE:=ams-admin}"
-: "${AWS_REGION:=us-west-2}"
-: "${STACK:=AmsDashboardStack}"
-: "${ACM_CERT_ARN:=}"
-export AWS_PROFILE AWS_REGION
-
-CONTEXT_FLAGS=(-c create_vpc=true -c public_alb=true)
-if [[ -n "$ACM_CERT_ARN" ]]; then
-  # HTTPS path: provide the cert ARN; the stack drops the HTTP listener
-  # in favor of TLS so we don't need allow_public_http=true.
-  CONTEXT_FLAGS+=(-c "acm_cert_arn=$ACM_CERT_ARN")
-else
-  CONTEXT_FLAGS+=(-c allow_public_http=true)
-fi
-
+ENV_NAME="${DEPLOY_ENV:-prod}"
+ACTION=deploy
 AUTO_APPROVE=()
 EXTRA=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --yes|-y)
-      AUTO_APPROVE=(--require-approval never)
-      shift
-      ;;
-    --)
-      shift
-      EXTRA=("$@")
-      break
-      ;;
-    *)
-      EXTRA+=("$1")
-      shift
-      ;;
+    --env)   ENV_NAME="$2"; shift 2 ;;
+    --env=*) ENV_NAME="${1#--env=}"; shift ;;
+    --diff)  ACTION=diff; shift ;;
+    --synth) ACTION=synth; shift ;;
+    --yes|-y) AUTO_APPROVE=(--require-approval never); shift ;;
+    --) shift; EXTRA=("$@"); break ;;
+    *) EXTRA+=("$1"); shift ;;
   esac
 done
+
+# Command-line ACM_CERT_ARN wins over the env file's value.
+CLI_ACM_CERT_ARN="${ACM_CERT_ARN:-}"
+load_env "$ENV_NAME"
+[[ -n "$CLI_ACM_CERT_ARN" ]] && ACM_CERT_ARN="$CLI_ACM_CERT_ARN"
+build_context_flags
+
+cd "$REPO_ROOT/infra"
 
 # Activate the CDK venv if we find one and the user hasn't already.
 if [[ -z "${VIRTUAL_ENV:-}" && -f "$REPO_ROOT/infra/.venv/bin/activate" ]]; then
@@ -73,27 +54,29 @@ if [[ -z "${VIRTUAL_ENV:-}" && -f "$REPO_ROOT/infra/.venv/bin/activate" ]]; then
   source "$REPO_ROOT/infra/.venv/bin/activate"
 fi
 
-# Silence the noisy untested-node-version banner that newer Node spits out
-# under jsii. We pin a CDK-supported Node in CI; locally users may run newer.
+# Silence the noisy untested-node-version banner newer Node prints under jsii.
 export JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION=1
 
-echo "→ Deploying $STACK to $AWS_REGION (profile $AWS_PROFILE)"
+echo "→ cdk $ACTION $STACK in $AWS_REGION (profile $AWS_PROFILE, env $ENV_NAME)"
 echo "  Context: ${CONTEXT_FLAGS[*]}"
-if [[ -n "$ACM_CERT_ARN" ]]; then
-  echo "  Scheme:  internet-facing, HTTPS via ACM cert $ACM_CERT_ARN"
+if [[ -n "${ACM_CERT_ARN:-}" ]]; then
+  echo "  Scheme:  HTTPS via pre-issued cert $ACM_CERT_ARN"
+elif [[ -n "${DOMAIN_NAME:-}" ]]; then
+  echo "  Scheme:  HTTPS at https://$DOMAIN_NAME (cert issued + DNS record by the stack)"
 else
-  echo "  Scheme:  internet-facing, plain HTTP (set ACM_CERT_ARN=... for HTTPS)"
+  echo "  Scheme:  plain HTTP (no cert; set DOMAIN_NAME or ACM_CERT_ARN for HTTPS)"
+fi
+
+if [[ "$ACTION" != "deploy" ]]; then
+  exec cdk "$ACTION" "$STACK" "${CONTEXT_FLAGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"}
 fi
 
 # `set -o pipefail` so a Docker build failure (which CDK pipes through
-# `tee`) actually fails the script. Without it, the original deploy can
-# silently exit 0 even when the build broke.
-set -o pipefail
-LOG="/tmp/cdk-deploy-$(date +%Y%m%d-%H%M%S).log"
+# `tee`) actually fails the script.
+LOG="/tmp/cdk-deploy-$ENV_NAME-$(date +%Y%m%d-%H%M%S).log"
 echo "  Log:     $LOG"
-# macOS ships bash 3.2 which treats empty arrays as unset under `set -u`.
-# The `${name[@]+"${name[@]}"}` dance expands to nothing when the array is
-# empty and to the array's contents (preserving quoting) otherwise.
+# macOS ships bash 3.2 which treats empty arrays as unset under `set -u`;
+# the ${name[@]+"${name[@]}"} dance expands to nothing when empty.
 cdk deploy "$STACK" \
   "${CONTEXT_FLAGS[@]}" \
   ${AUTO_APPROVE[@]+"${AUTO_APPROVE[@]}"} \

@@ -68,6 +68,29 @@ Optional context:
   - tags                    : JSON object of additional tags to apply
                               stack-wide, e.g.
                               -c tags='{"CostCenter":"4321","Owner":"AMS-IT"}'
+  - domain_name             : public hostname for the dashboard, e.g.
+                              'ams-dev.example.com'. Together with
+                              hosted_zone_id + hosted_zone_name the stack
+                              issues a DNS-validated ACM certificate (apex +
+                              wildcard, so later hostnames such as
+                              portal.<domain_name> share it) and creates the
+                              Route53 alias record pointing at the ALB.
+                              Implies HTTPS; combine with public_alb=true.
+                              Ignored for the cert when acm_cert_arn is set.
+  - hosted_zone_id          : Route53 hosted zone ID that owns domain_name.
+  - hosted_zone_name        : that zone's name, e.g. 'example.com'.
+  - jira_sync_enabled       : 'true' (default) / 'false'. When false the
+                              three scheduled JIRA sync tasks are not
+                              created. Use this for synthetic-data
+                              environments that must never contact the
+                              real JIRA tenant.
+  - stack_name              : (read by app.py) CloudFormation stack name,
+                              default 'AmsDashboardStack'.
+
+Per-environment resource names: ``environment`` other than 'prod' is
+appended to the Cognito pool name and the CloudWatch log group names
+(``ams-dashboard-<env>``, ``/ams-dashboard-<env>/api``) so a second copy of
+the stack can live in the same account+region. prod keeps the bare names.
 
 Outputs:
   - ALB DNS name (point your internal DNS CNAME at this)
@@ -75,6 +98,7 @@ Outputs:
   - Cluster + service names for ``aws ecs run-task`` commands
 """
 import json
+import re
 from pathlib import Path
 
 import aws_cdk as cdk
@@ -91,6 +115,7 @@ from aws_cdk import (
     aws_elasticloadbalancingv2 as elbv2,
     aws_logs as logs,
     aws_rds as rds,
+    aws_route53 as route53,
     aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
@@ -123,8 +148,28 @@ class AmsDashboardStack(cdk.Stack):
                 "vpc_id and create_vpc=true are mutually exclusive — pick one."
             )
         cert_arn = self.node.try_get_context("acm_cert_arn") or ""
+        domain_name = self.node.try_get_context("domain_name") or ""
+        hosted_zone_id = self.node.try_get_context("hosted_zone_id") or ""
+        hosted_zone_name = self.node.try_get_context("hosted_zone_name") or ""
+        if domain_name and not (hosted_zone_id and hosted_zone_name):
+            raise ValueError(
+                "When -c domain_name=… is set, also pass -c hosted_zone_id=… and "
+                "-c hosted_zone_name=… for the Route53 zone that owns it. The "
+                "stack validates the ACM certificate and creates the alias "
+                "record in that zone."
+            )
+        if domain_name and not (
+            domain_name == hosted_zone_name
+            or domain_name.endswith("." + hosted_zone_name)
+        ):
+            raise ValueError(
+                f"domain_name '{domain_name}' is not inside hosted zone "
+                f"'{hosted_zone_name}'."
+            )
         public_alb = str(self.node.try_get_context("public_alb") or "").lower() == "true"
-        if public_alb and not cert_arn:
+        # A domain implies HTTPS — either an imported cert or one we issue.
+        has_tls = bool(cert_arn or domain_name)
+        if public_alb and not has_tls:
             # Refuse a public-on-HTTP deploy by default — logins (passwords +
             # JWTs) would go over the wire unencrypted. Override with
             # -c allow_public_http=true if you really want to.
@@ -137,7 +182,17 @@ class AmsDashboardStack(cdk.Stack):
                     "be sent over HTTP. Set -c acm_cert_arn=<ACM ARN> to enable HTTPS, "
                     "or -c allow_public_http=true to explicitly accept the risk."
                 )
-        environment = self.node.try_get_context("environment") or "prod"
+        environment = str(self.node.try_get_context("environment") or "prod")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", environment):
+            raise ValueError(
+                f"environment '{environment}' must be lowercase letters, digits "
+                "and hyphens — it is embedded in resource names."
+            )
+        # Physical resource *names* must be unique per account+region. prod
+        # keeps the historical bare names so the company deployment is
+        # untouched; every other environment gets a suffix so a second copy
+        # of this stack can coexist alongside it.
+        name_suffix = "" if environment == "prod" else f"-{environment}"
         extra_tags_raw = self.node.try_get_context("tags") or "{}"
         try:
             extra_tags = json.loads(extra_tags_raw) if isinstance(extra_tags_raw, str) else extra_tags_raw
@@ -308,8 +363,12 @@ class AmsDashboardStack(cdk.Stack):
         db_cluster = rds.DatabaseCluster(
             self,
             "Db",
+            # 16.11 is what the company cluster already runs after RDS
+            # auto minor-version upgrades; 16.4 was withdrawn from new
+            # cluster creation in 2026 (first personal-dev deploy failed on
+            # it). Keep this at a version RDS still offers for *creation*.
             engine=rds.DatabaseClusterEngine.aurora_postgres(
-                version=rds.AuroraPostgresEngineVersion.VER_16_4
+                version=rds.AuroraPostgresEngineVersion.VER_16_11
             ),
             writer=rds.ClusterInstance.serverless_v2("Writer"),
             serverless_v2_min_capacity=0.5,
@@ -333,7 +392,7 @@ class AmsDashboardStack(cdk.Stack):
         user_pool = cognito.UserPool(
             self,
             "UserPool",
-            user_pool_name="ams-dashboard",
+            user_pool_name=f"ams-dashboard{name_suffix}",
             sign_in_aliases=cognito.SignInAliases(email=True),
             self_sign_up_enabled=False,
             account_recovery=cognito.AccountRecovery.EMAIL_ONLY,
@@ -407,7 +466,7 @@ class AmsDashboardStack(cdk.Stack):
         log_group = logs.LogGroup(
             self,
             "ApiLogs",
-            log_group_name="/ams-dashboard/api",
+            log_group_name=f"/ams-dashboard{name_suffix}/api",
             retention=logs.RetentionDays.TWO_WEEKS,
             # RETAIN so logs survive stack rollback — without this, a CFN
             # rollback after a failed first deploy nukes the log group along
@@ -426,6 +485,14 @@ class AmsDashboardStack(cdk.Stack):
             "COGNITO_USER_POOL_ID": user_pool.user_pool_id,
             "COGNITO_APP_CLIENT_ID": app_client.user_pool_client_id,
         }
+        if domain_name:
+            # Django admin and any other session/CSRF-protected view must
+            # trust the public origin once the app is reached via a real
+            # hostname over HTTPS. The wildcard covers sibling hostnames
+            # (e.g. the customer portal) that share this backend.
+            common_env["CSRF_TRUSTED_ORIGINS"] = (
+                f"https://{domain_name},https://*.{domain_name}"
+            )
         common_secrets = {
             "SECRET_KEY": ecs.Secret.from_secrets_manager(django_secret),
             "DB_HOST": ecs.Secret.from_secrets_manager(db_cluster.secret, "host"),
@@ -438,11 +505,31 @@ class AmsDashboardStack(cdk.Stack):
         }
 
         # ── API service (internal ALB → Fargate) ───────────────────────
-        certificate = (
-            acm.Certificate.from_certificate_arn(self, "ApiCert", cert_arn)
-            if cert_arn
+        hosted_zone = (
+            route53.HostedZone.from_hosted_zone_attributes(
+                self,
+                "HostedZone",
+                hosted_zone_id=hosted_zone_id,
+                zone_name=hosted_zone_name,
+            )
+            if domain_name
             else None
         )
+        if cert_arn:
+            certificate = acm.Certificate.from_certificate_arn(self, "ApiCert", cert_arn)
+        elif domain_name:
+            # DNS-validated cert in the ALB's region. The wildcard SAN lets
+            # later hostnames under the same domain (the customer portal at
+            # portal.<domain_name>, for one) reuse this single certificate.
+            certificate = acm.Certificate(
+                self,
+                "ApiCert",
+                domain_name=domain_name,
+                subject_alternative_names=[f"*.{domain_name}"],
+                validation=acm.CertificateValidation.from_dns(hosted_zone),
+            )
+        else:
+            certificate = None
 
         api_service = ecs_patterns.ApplicationLoadBalancedFargateService(
             self,
@@ -455,6 +542,10 @@ class AmsDashboardStack(cdk.Stack):
             task_subnets=task_subnets,
             assign_public_ip=task_assign_public_ip,
             certificate=certificate,
+            # With a zone, the construct creates the A/alias record for
+            # domain_name → this ALB.
+            domain_name=domain_name or None,
+            domain_zone=hosted_zone,
             redirect_http=bool(certificate),
             protocol=elbv2.ApplicationProtocol.HTTPS if certificate else elbv2.ApplicationProtocol.HTTP,
             task_image_options=ecs_patterns.ApplicationLoadBalancedTaskImageOptions(
@@ -564,7 +655,7 @@ class AmsDashboardStack(cdk.Stack):
         sync_log_group = logs.LogGroup(
             self,
             "SyncLogs",
-            log_group_name="/ams-dashboard/jira-sync",
+            log_group_name=f"/ams-dashboard{name_suffix}/jira-sync",
             retention=logs.RetentionDays.TWO_WEEKS,
             removal_policy=RemovalPolicy.RETAIN,
         )
@@ -612,21 +703,28 @@ class AmsDashboardStack(cdk.Stack):
                 db_cluster.connections.allow_default_port_from(sg)
             return task_def
 
-        _scheduled_sync(
-            "JiraSyncOrgs",
-            "sync_jira_orgs",
-            appscaling.Schedule.rate(Duration.hours(6)),
+        jira_sync_enabled = (
+            str(self.node.try_get_context("jira_sync_enabled") or "true").lower() != "false"
         )
-        _scheduled_sync(
-            "JiraSyncUsers",
-            "sync_jira_users",
-            appscaling.Schedule.rate(Duration.hours(6)),
-        )
-        _scheduled_sync(
-            "JiraSyncTickets",
-            "sync_jira_tickets",
-            appscaling.Schedule.rate(Duration.minutes(30)),
-        )
+        if jira_sync_enabled:
+            _scheduled_sync(
+                "JiraSyncOrgs",
+                "sync_jira_orgs",
+                appscaling.Schedule.rate(Duration.hours(6)),
+            )
+            _scheduled_sync(
+                "JiraSyncUsers",
+                "sync_jira_users",
+                appscaling.Schedule.rate(Duration.hours(6)),
+            )
+            _scheduled_sync(
+                "JiraSyncTickets",
+                "sync_jira_tickets",
+                appscaling.Schedule.rate(Duration.minutes(30)),
+            )
+        # else: synthetic-data environment — no schedules, so nothing in this
+        # account ever calls the real JIRA tenant. The sync commands still
+        # exist in the image and can be run by hand if ever needed.
 
         # ── Outputs ────────────────────────────────────────────────────
         cdk.CfnOutput(self, "AlbDnsName", value=api_service.load_balancer.load_balancer_dns_name)
@@ -638,3 +736,5 @@ class AmsDashboardStack(cdk.Stack):
         cdk.CfnOutput(self, "DbClusterEndpoint", value=db_cluster.cluster_endpoint.hostname)
         cdk.CfnOutput(self, "DjangoSecretArn", value=django_secret.secret_arn)
         cdk.CfnOutput(self, "JiraSecretArn", value=jira_secret.secret_arn)
+        if domain_name:
+            cdk.CfnOutput(self, "AppUrl", value=f"https://{domain_name}")

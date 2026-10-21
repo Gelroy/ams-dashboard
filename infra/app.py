@@ -26,10 +26,14 @@ if not account or not region:
 # bootstrap run cleanly without spurious lookups or errors.
 vpc_id = app.node.try_get_context("vpc_id")
 create_vpc = str(app.node.try_get_context("create_vpc") or "").lower() == "true"
+# The CloudFormation stack name. Defaults to the historical name so the
+# company deployment is unaffected; other environments (see
+# infra/environments/*.env) pass their own so several copies can coexist.
+stack_name = app.node.try_get_context("stack_name") or "AmsDashboardStack"
 if vpc_id or create_vpc:
     AmsDashboardStack(
         app,
-        "AmsDashboardStack",
+        stack_name,
         env=cdk.Environment(account=account, region=region),
     )
 else:

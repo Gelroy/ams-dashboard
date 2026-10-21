@@ -117,7 +117,7 @@ Every AWS resource currently provisioned by the stack, grouped by layer.
 
 | Resource | Resource ID / Name | Purpose |
 |---|---|---|
-| Aurora Cluster | `amsdashboardstack-db5d02a0a9-smiqefm0qfai` | Postgres 16.4, Serverless v2 (0.5–2 ACU) |
+| Aurora Cluster | `amsdashboardstack-db5d02a0a9-smiqefm0qfai` | Postgres 16.11, Serverless v2 (0.5–2 ACU) |
 | Aurora Writer instance | `amsdashboardstack-db5d02a0a9-…-writer` | Single writer, multi-AZ-aware |
 | Aurora secret | `AmsDashboardStackDbSecret1F-KEOtKLeuMPbQ-wlaEkM` (Secrets Manager) | Auto-generated master creds (`ams` user) |
 | Django SECRET_KEY secret | `DjangoSecretKey0A000B3C-z2Au0NDSvzXo-…` | Auto-generated 64-char random string |
@@ -725,11 +725,17 @@ infra/
 ├── requirements.txt                  # aws-cdk-lib, etc.
 ├── infra/
 │   └── infra_stack.py                # The single AmsDashboardStack class
+├── environments/
+│   ├── prod.env                      # Company account: profile, account, region, stack, context
+│   └── personal-dev.env              # Customer Portal skunkworks clone (personal account)
 ├── scripts/
+│   ├── env-lib.sh                    # Loads an environment file + account guard (sourced by the two below)
+│   ├── deploy.sh                     # cdk deploy/diff/synth for --env <name>
+│   ├── run-task.sh                   # Run a manage.py command (migrate, seed_synthetic) inside the stack
 │   ├── admin-bootstrap-cli.sh        # Bootstrap via CFN, no Node needed
 │   ├── admin-bootstrap-raw-cli.sh    # Bootstrap with raw aws-cli calls (no CFN)
 │   └── grant-cdk-deploy-perms.sh     # IAM policy for the routine-deploy principal
-└── tests/unit/test_infra_stack.py    # CDK assertions
+└── tests/unit/test_infra_stack.py    # CDK assertions (prod path + second-environment path)
 ```
 
 ### 6.2 `infra/app.py`
@@ -748,7 +754,7 @@ A single class that wires up the entire application. Major sections, in order:
    - `vpc_id` + `private_subnet_ids`: import an existing VPC with explicit subnets (used when the existing VPC isn't CDK-tagged).
    - `vpc_id` alone: `Vpc.from_lookup()` (only works if the VPC's subnets carry CDK tags).
 5. **Secrets Manager** — auto-generated Django `SECRET_KEY`, plus an empty JIRA secret the admin populates after first deploy.
-6. **Aurora cluster** — Postgres 16.4 Serverless v2 (0.5–2 ACU), single writer, `removalPolicy=SNAPSHOT`, 7-day backups, dedicated security group.
+6. **Aurora cluster** — Postgres 16.11 Serverless v2 (0.5–2 ACU), single writer, `removalPolicy=SNAPSHOT`, 7-day backups, dedicated security group.
 7. **Cognito** — User Pool (`ams-dashboard`, email sign-in, no self-signup, RETAIN), App Client (USER_PASSWORD_AUTH + authorization_code_grant, no client secret).
 8. **Container image** — `ecr_assets.DockerImageAsset` builds from `Dockerfile`, pushes to ECR via CDK's asset system.
 9. **ECS cluster** — Container Insights v2 enabled.
@@ -774,8 +780,13 @@ A single class that wires up the entire application. Major sections, in order:
 | `add_vpc_endpoints` | bool | `false` | Provision Secrets Manager / ECR / Logs interface endpoints + S3 gateway (for isolated VPCs) |
 | `vpc_cidr` | string | – | Required for add_vpc_endpoints to scope endpoint SG |
 | `private_route_table_ids` | csv | – | Required for add_vpc_endpoints; S3 gateway route attachment |
-| `environment` | string | `prod` | Stack-level tag |
+| `environment` | string | `prod` | Stack-level tag; non-prod values are also appended to the Cognito pool and log group names |
 | `tags` | JSON | `{}` | Extra tags merged into stack-wide tagging |
+| `stack_name` | string | `AmsDashboardStack` | CloudFormation stack name (read in `app.py`) |
+| `domain_name` | string | – | Public hostname; with the two zone values below the stack issues an ACM cert (apex + wildcard) and creates the Route53 alias at the ALB |
+| `hosted_zone_id` | string | – | Route53 zone that owns `domain_name` |
+| `hosted_zone_name` | string | – | That zone's name |
+| `jira_sync_enabled` | bool | `true` | `false` skips the three scheduled JIRA sync tasks (synthetic-data environments) |
 
 ---
 

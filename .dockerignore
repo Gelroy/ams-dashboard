@@ -34,3 +34,8 @@ infra
 db
 README*
 *.md
+
+# CDK tooling — never part of the image build context
+infra/.venv
+infra/cdk.out
+infra/tests
