@@ -264,3 +264,87 @@ a stable DNS target, and will host-route the portal hostname in Phase 1
 **Next:** Phase 1 (customer Cognito pool with MFA, `PortalAccount`,
 Invite-to-Portal, dual-issuer JWT auth, portal SPA shell at
 `portal.ams-dev.getshaking.live`, isolation tests).
+
+## 10. Phase 1 — Identity (2026-11-13)
+
+Built 2026-11-13; deployed to `personal-dev` and verified live 2026-11-16.
+Portal: https://portal.ams-dev.getshaking.live
+
+| | |
+|---|---|
+| Customer pool | `us-east-1_pcX353APB` (`ams-portal-personal-dev`) |
+| App client | `70pdihlv8o9rsqrg5od53j08tn` |
+| Migration | `portal.0001_initial` applied 2026-11-16 |
+| Live smoke | 35/35 checks passed 2026-11-16 |
+
+### What exists now
+
+| Piece | Where | Notes |
+|---|---|---|
+| Customer user pool | `infra_stack.py` (`portal_enabled`) | `ams-portal-<env>`. No self-signup. **TOTP MFA required.** 12-char passwords. Refresh tokens last 1 day (staff pool keeps 30). Invitation email names the portal URL. |
+| `PortalAccount` | `api/portal/models.py` | As §5: OneToOne → `OrgUser`, globally unique `email_lower`, `cognito_sub`, `status` invited/active/disabled, `invited_by` (+ `invited_by_email`), `last_login_at`. No copied customer data. |
+| Two authentication classes | `api/ams_dashboard/auth_cognito.py`, `api/portal/auth.py` | Staff class validates **only** the staff pool and stays the DRF default. Portal class validates **only** the customer pool and is mounted only on `/api/portal/*`. Different signing keys ⇒ a token from the wrong pool fails signature validation (401). |
+| Tenant scope | `api/portal/scoping.py`, `views.py` | Organization comes from token → PortalAccount → OrgUser. No portal endpoint accepts an organization id. `PortalScopedMixin` is the base for every future data viewset. |
+| Sign-in relay | `api/portal/views.py` | `/api/portal/auth/{login,new-password,mfa/setup,mfa/verify,refresh,logout}`. Tokens leave the server only via `_finish_login`, which requires a usable PortalAccount. Account state is re-checked on **every** request, so disabling is immediate. |
+| Invite / resend / disable / enable | `api/portal/services.py`, `OrgUserViewSet` | `POST /api/organizations/<org>/users/<id>/portal-<action>/`, admin only. Rules: email required (local override wins), staff domains refused, one customer per email (409 naming the other customer), no double invite. |
+| Dashboard UI | Customer Detail → Users → **Portal** column | Status badge + Invite / Resend / Disable / Enable. Invite and Disable confirm first. |
+| Host split | `api/ams_dashboard/middleware.py`, `spa.py` | On `PORTAL_HOST`: only `/api/portal/*`, `/health`, `/static/*`, portal SPA. `/admin` and staff APIs are 404 there; `/api/portal/*` is 404 on the dashboard host. |
+| Portal SPA | `portal/` | Sign in → (first time) choose password → enrol authenticator via QR → home. Returning: password → 6-digit code. Home shows the customer's AMS level, help desk number, environments and server counts. Tokens in `sessionStorage`. |
+
+### Tests (isolation first, as §4 asked)
+
+`api/portal/tests.py` — 91 tests, no Cognito or network needed
+(`cd api && .venv/bin/python -m pytest`; in-memory SQLite, real auth
+classes via `ams_dashboard/settings_test.py`):
+
+- a customer token is sent to **every** parameter-free staff route found
+  by walking the URLconf → all 401; staff token → portal → 401;
+- wrong key, wrong audience, access token, expired, forged issuer → 401;
+- disabled / invited / unknown identity / soft-deleted user / soft-deleted
+  customer → 401, including on an already-issued token;
+- customer A never sees customer B (supplied organization ids ignored);
+- every `/api/portal/` data route is asserted to carry the portal
+  authentication + permission classes (guards future endpoints);
+- host split; invite rules; sign-in relay incl. token withholding.
+
+Three guards were mutation-checked (soft-delete check, org filter,
+id-token check): each removal makes tests fail.
+
+`infra/scripts/portal-smoke.py --env personal-dev` runs the same story
+end to end against the deployed stack with real Cognito (throwaway staff
+and customer identities, real TOTP codes), then cleans up.
+It leaves one disabled `PortalAccount` row; remove it with
+`infra/scripts/run-task.sh --env personal-dev portal_prune_smoke`.
+
+Deploy gotcha: a deploy that stalls for hours (laptop asleep) fails at
+`docker push` with `403 Forbidden` because the ECR login expired. The
+stack is untouched; just rerun `deploy.sh`.
+
+### Decisions taken (were open in §7)
+
+- **MFA:** authenticator app (TOTP), mandatory. Needs no SES/SNS.
+- **Roles within a customer:** none in v1 — every portal user of a
+  customer sees the same thing. Add a `role` on `PortalAccount` when
+  documents/tickets need admin-vs-viewer.
+- **SSO federation:** not in v1 (email + password + TOTP).
+
+### Known gaps (deliberate, for later phases)
+
+- **No self-service password reset or MFA reset.** A locked-out customer
+  needs staff: today that means the AWS console. Needs a "Reset access"
+  action next to Disable, and a forgot-password flow (which needs SES for
+  reliable email).
+- **Email changes are not propagated.** The Cognito username and
+  `email_lower` are fixed at invite time; if the JIRA email later changes,
+  the portal login does not follow.
+- **Invitation email uses Cognito's default sender** (50/day, generic
+  from-address). Fine for dev; production needs SES on a real domain.
+- **No audit log** of portal sign-ins/invites beyond the PortalAccount
+  timestamps and CloudWatch.
+- **Local portal development** needs real customer-pool tokens; there is
+  no `AUTH_BYPASS` equivalent for portal endpoints (on purpose). Use
+  `PORTAL_API_TARGET=https://portal.ams-dev.getshaking.live npm run dev`.
+
+**Next:** Phase 2 — Documents (private S3 bucket, staff upload from
+Customer Detail, portal list + presigned download). The §7 questions about
+where the monthly AMS reports come from and their format are now blocking.

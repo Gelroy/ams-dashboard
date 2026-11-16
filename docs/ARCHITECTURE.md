@@ -67,7 +67,8 @@ The ALB DNS will change whenever its `public_load_balancer` property is toggled 
 ```
 AMS_Dashboard/
 ├── api/            # Django 5 + DRF backend
-├── web/            # React + TypeScript + Vite frontend
+├── web/            # React + TypeScript + Vite frontend (staff dashboard)
+├── portal/         # React + TypeScript + Vite frontend (customer portal; served on the portal hostname)
 ├── infra/          # AWS CDK (Python) stack
 ├── db/             # Reference schema dump (not source of truth — Django migrations are)
 ├── docs/           # This file + DEPLOY.md + DEPLOY_TROUBLESHOOTING.md
@@ -789,6 +790,8 @@ A single class that wires up the entire application. Major sections, in order:
 | `jira_sync_enabled` | bool | `true` | `false` skips the three scheduled JIRA sync tasks (synthetic-data environments) |
 | `aurora_auto_pause_minutes` | int | `0` | 5–1440: Aurora min capacity 0 ACU + auto-pause after that many idle minutes (dev cost lever) |
 | `api_desired_count` | int | `1` | Number of API tasks; `0` parks the environment |
+| `portal_enabled` | bool | `false` | Customer Portal identity layer: separate customer Cognito pool (mandatory TOTP), app client, IAM grant for invites, `portal.<domain_name>` alias. See `docs/CUSTOMER_PORTAL.md` §10 |
+| `portal_staff_email_domains` | csv | `imt.ca` | Domains that may never be invited as customers |
 
 ---
 

@@ -20,6 +20,8 @@ the company account (or vice versa).
 | `JIRA_SYNC_ENABLED` | `false` disables the scheduled JIRA sync tasks |
 | `AURORA_AUTO_PAUSE_MINUTES` | `0` keeps the 0.5 ACU floor; 5–1440 lets Aurora pause to 0 ACU after that many idle minutes |
 | `API_DESIRED_COUNT` | API tasks to run; `0` parks the environment |
+| `PORTAL_ENABLED` | `true` creates the customer Cognito pool and `portal.<DOMAIN_NAME>` |
+| `PORTAL_STAFF_EMAIL_DOMAINS` | Comma-separated domains never invited as customers (default `imt.ca`) |
 
 Files are plain `KEY=value` lines (sourced by bash) — no quotes needed, no
 secrets allowed.

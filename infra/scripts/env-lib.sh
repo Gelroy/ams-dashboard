@@ -68,6 +68,12 @@ build_context_flags() {
   if [[ -n "${API_DESIRED_COUNT:-}" ]]; then
     CONTEXT_FLAGS+=(-c "api_desired_count=$API_DESIRED_COUNT")
   fi
+  if [[ "${PORTAL_ENABLED:-false}" == "true" ]]; then
+    CONTEXT_FLAGS+=(-c portal_enabled=true)
+    if [[ -n "${PORTAL_STAFF_EMAIL_DOMAINS:-}" ]]; then
+      CONTEXT_FLAGS+=(-c "portal_staff_email_domains=$PORTAL_STAFF_EMAIL_DOMAINS")
+    fi
+  fi
 }
 
 # Log group name must mirror infra_stack.py's name_suffix rule.

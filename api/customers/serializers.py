@@ -152,6 +152,10 @@ class OrganizationSerializer(serializers.ModelSerializer):
 
 
 class OrgUserSerializer(serializers.ModelSerializer):
+    # Customer-portal access for this user, or null if never invited.
+    # Read-only here; changed through the portal-* actions on the viewset.
+    portal_account = serializers.SerializerMethodField()
+
     class Meta:
         model = OrgUser
         fields = [
@@ -167,6 +171,7 @@ class OrgUserSerializer(serializers.ModelSerializer):
             "is_primary",
             "ams_report",
             "is_hidden",
+            "portal_account",
         ]
         read_only_fields = [
             "id",
@@ -175,6 +180,18 @@ class OrgUserSerializer(serializers.ModelSerializer):
             "display_name",
             "email",
         ]
+
+    def get_portal_account(self, obj):
+        account = getattr(obj, "portal_account", None)
+        if account is None:
+            return None
+        return {
+            "status": account.status,
+            "email": account.email_lower,
+            "invited_at": account.invited_at,
+            "invited_by": account.invited_by_email,
+            "last_login_at": account.last_login_at,
+        }
 
 
 class EnvironmentSerializer(serializers.ModelSerializer):

@@ -205,6 +205,37 @@ export function updateOrgUser(
   })
 }
 
+// Customer Portal access for one user. Admin-only on the backend; the
+// business rules (email required, no staff domains, one customer per
+// email) are enforced there and come back as {detail} with a 4xx.
+export type PortalUserAction = 'invite' | 'resend' | 'disable' | 'enable'
+
+export function portalUserAction(
+  orgId: string,
+  userId: string,
+  action: PortalUserAction,
+): Promise<OrgUser> {
+  return request<OrgUser>(`/organizations/${orgId}/users/${userId}/portal-${action}/`, {
+    method: 'POST',
+  })
+}
+
+/** request() throws `HTTP 409 Conflict — {"detail":"…"}`. Pull out the
+ *  human-readable detail when there is one. */
+export function apiErrorDetail(e: unknown): string {
+  const message = e instanceof Error ? e.message : String(e)
+  const jsonStart = message.indexOf('{')
+  if (jsonStart >= 0) {
+    try {
+      const body = JSON.parse(message.slice(jsonStart)) as { detail?: unknown }
+      if (typeof body.detail === 'string') return body.detail
+    } catch {
+      // not JSON — fall through
+    }
+  }
+  return message
+}
+
 // Environments are non-paginated.
 export function listEnvironments(orgId: string): Promise<Environment[]> {
   return request<Environment[]>(`/organizations/${orgId}/environments/`)

@@ -95,6 +95,15 @@ Optional context:
   - api_desired_count       : number of API tasks (default 1). 0 stops the
                               API entirely (ALB keeps billing) — a cheap
                               way to park a dev environment for weeks.
+  - portal_enabled          : 'true' creates the Customer Portal identity
+                              layer: a second, separate Cognito user pool
+                              for customers (mandatory TOTP MFA, no
+                              self-signup), its app client, the IAM grant
+                              the API needs to invite users, and — when
+                              domain_name is set — the portal.<domain_name>
+                              alias record. Default false.
+  - portal_staff_email_domains : comma-separated domains that may never be
+                              invited as customers (default 'imt.ca').
 
 Per-environment resource names: ``environment`` other than 'prod' is
 appended to the Cognito pool name and the CloudWatch log group names
@@ -125,6 +134,7 @@ from aws_cdk import (
     aws_logs as logs,
     aws_rds as rds,
     aws_route53 as route53,
+    aws_route53_targets as route53_targets,
     aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
@@ -206,6 +216,13 @@ class AmsDashboardStack(cdk.Stack):
         if auto_pause_minutes and not 5 <= auto_pause_minutes <= 1440:
             raise ValueError("aurora_auto_pause_minutes must be 0 (off) or between 5 and 1440.")
         api_desired_count = int(self.node.try_get_context("api_desired_count") or 1)
+        portal_enabled = str(self.node.try_get_context("portal_enabled") or "").lower() == "true"
+        portal_staff_domains = str(
+            self.node.try_get_context("portal_staff_email_domains") or "imt.ca"
+        )
+        # Customers reach the portal on its own hostname; without a domain
+        # the pool still exists but there is no host split.
+        portal_host = f"portal.{domain_name}" if (portal_enabled and domain_name) else ""
         if api_desired_count < 0:
             raise ValueError("api_desired_count must be 0 or more.")
         extra_tags_raw = self.node.try_get_context("tags") or "{}"
@@ -468,6 +485,69 @@ class AmsDashboardStack(cdk.Stack):
             precedence=10,
         )
 
+        # ── Cognito: customer portal pool (separate from staff) ────────
+        # Customers and staff never share a pool: different signing keys and
+        # issuers are what keep a customer token from ever authenticating
+        # against a dashboard endpoint (see api/ams_dashboard/auth_cognito.py).
+        portal_pool = None
+        portal_client = None
+        if portal_enabled:
+            portal_url = f"https://{portal_host}" if portal_host else "the AMS Customer Portal"
+            portal_pool = cognito.UserPool(
+                self,
+                "PortalUserPool",
+                user_pool_name=f"ams-portal{name_suffix}",
+                sign_in_aliases=cognito.SignInAliases(email=True),
+                sign_in_case_sensitive=False,
+                # Accounts exist only because staff invited them from the
+                # dashboard (Customer Detail → Users → Invite to Portal).
+                self_sign_up_enabled=False,
+                # Authenticator-app MFA for every customer. TOTP needs no
+                # SES/SNS setup, unlike email or SMS codes.
+                mfa=cognito.Mfa.REQUIRED,
+                mfa_second_factor=cognito.MfaSecondFactor(sms=False, otp=True),
+                password_policy=cognito.PasswordPolicy(
+                    min_length=12,
+                    require_lowercase=True,
+                    require_uppercase=True,
+                    require_digits=True,
+                    require_symbols=False,
+                    temp_password_validity=Duration.days(7),
+                ),
+                account_recovery=cognito.AccountRecovery.EMAIL_ONLY,
+                user_invitation=cognito.UserInvitationConfig(
+                    email_subject="Your AMS Customer Portal access",
+                    email_body=(
+                        "Hello,<br><br>"
+                        "You have been given access to the AMS Customer Portal.<br><br>"
+                        f"Sign in at {portal_url} with:<br>"
+                        "Email: {username}<br>"
+                        "Temporary password: {####}<br><br>"
+                        "You will be asked to choose a new password and to set up an "
+                        "authenticator app (such as Microsoft Authenticator or Google "
+                        "Authenticator). The temporary password expires in 7 days."
+                    ),
+                ),
+                # Customer identities are real data in prod; in other
+                # environments they are throwaway, and a retained pool only
+                # leaves orphans behind after a failed deploy.
+                removal_policy=(
+                    RemovalPolicy.RETAIN if environment == "prod" else RemovalPolicy.DESTROY
+                ),
+            )
+            portal_client = portal_pool.add_client(
+                "PortalAppClient",
+                auth_flows=cognito.AuthFlow(user_password=True),
+                generate_secret=False,
+                prevent_user_existence_errors=True,
+                enable_token_revocation=True,
+                id_token_validity=Duration.minutes(60),
+                access_token_validity=Duration.minutes(60),
+                # Short on purpose: a customer re-authenticates (password +
+                # MFA) at least daily. The staff client keeps the 30-day default.
+                refresh_token_validity=Duration.days(1),
+            )
+
         # ── Container image (CDK builds + pushes to ECR) ───────────────
         image_asset = ecr_assets.DockerImageAsset(
             self,
@@ -508,6 +588,15 @@ class AmsDashboardStack(cdk.Stack):
             "COGNITO_USER_POOL_ID": user_pool.user_pool_id,
             "COGNITO_APP_CLIENT_ID": app_client.user_pool_client_id,
         }
+        if portal_pool is not None:
+            common_env.update(
+                {
+                    "PORTAL_COGNITO_USER_POOL_ID": portal_pool.user_pool_id,
+                    "PORTAL_COGNITO_APP_CLIENT_ID": portal_client.user_pool_client_id,
+                    "PORTAL_HOST": portal_host,
+                    "PORTAL_STAFF_EMAIL_DOMAINS": portal_staff_domains,
+                }
+            )
         if domain_name:
             # Django admin and any other session/CSRF-protected view must
             # trust the public origin once the app is reached via a real
@@ -597,6 +686,30 @@ class AmsDashboardStack(cdk.Stack):
         )
         if api_desired_count == 0:
             api_service.service.node.default_child.add_property_override("DesiredCount", 0)
+
+        if portal_pool is not None:
+            # Exactly the admin calls api/portal/cognito.py makes, on exactly
+            # this pool. Sign-in itself uses the public client API (no IAM).
+            portal_pool.grant(
+                api_service.task_definition.task_role,
+                "cognito-idp:AdminCreateUser",
+                "cognito-idp:AdminGetUser",
+                "cognito-idp:AdminDisableUser",
+                "cognito-idp:AdminEnableUser",
+                "cognito-idp:AdminUserGlobalSignOut",
+            )
+            if portal_host and hosted_zone is not None:
+                # Same ALB, same wildcard certificate; Django splits the two
+                # hostnames (api/ams_dashboard/middleware.py).
+                route53.ARecord(
+                    self,
+                    "PortalAliasRecord",
+                    zone=hosted_zone,
+                    record_name=portal_host,
+                    target=route53.RecordTarget.from_alias(
+                        route53_targets.LoadBalancerTarget(api_service.load_balancer)
+                    ),
+                )
         db_cluster.connections.allow_default_port_from(api_service.service)
 
         # ── VPC endpoints (optional, when the VPC has no NAT/IGW egress) ──
@@ -765,3 +878,8 @@ class AmsDashboardStack(cdk.Stack):
         cdk.CfnOutput(self, "JiraSecretArn", value=jira_secret.secret_arn)
         if domain_name:
             cdk.CfnOutput(self, "AppUrl", value=f"https://{domain_name}")
+        if portal_pool is not None:
+            cdk.CfnOutput(self, "PortalUserPoolId", value=portal_pool.user_pool_id)
+            cdk.CfnOutput(self, "PortalAppClientId", value=portal_client.user_pool_client_id)
+            if portal_host:
+                cdk.CfnOutput(self, "PortalUrl", value=f"https://{portal_host}")

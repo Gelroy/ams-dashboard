@@ -797,3 +797,28 @@
 .cert-green { color: #16a34a; }
 .cert-yellow { color: #eab308; }
 .cert-red { color: #dc2626; }
+
+/* ── Customer Portal status (Customer Detail → Users) ───────────── */
+.portal-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+.badge-portal-invited {
+  background: #fffbeb;
+  border-color: #fde9b0;
+  color: #92600a;
+}
+.badge-portal-active {
+  background: #ecfdf5;
+  border-color: #c8efde;
+  color: #047857;
+}
+.badge-portal-disabled {
+  color: var(--color-text-secondary);
+}
+.btn-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

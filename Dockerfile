@@ -14,6 +14,19 @@ RUN npm run build
 # Produces /web/dist/ with index.html and assets/ (Vite base="/static/")
 
 # ─────────────────────────────────────────────────────────────────────────
+# Stage 1b: build the customer portal SPA (separate Vite project)
+# ─────────────────────────────────────────────────────────────────────────
+FROM node:24-alpine AS portal-builder
+WORKDIR /portal
+
+COPY portal/package.json portal/package-lock.json ./
+RUN npm ci
+
+COPY portal/ ./
+RUN npm run build
+# Produces /portal/dist/ (Vite base="/static/portal/")
+
+# ─────────────────────────────────────────────────────────────────────────
 # Stage 2: Python runtime (API + SPA served from one container)
 # ─────────────────────────────────────────────────────────────────────────
 FROM python:3.13-slim AS api
@@ -40,6 +53,8 @@ COPY api/ ./
 
 # Copy the built SPA from stage 1
 COPY --from=web-builder /web/dist ./web_build
+# …and the customer portal SPA, served on the portal hostname.
+COPY --from=portal-builder /portal/dist ./portal_build
 
 # Collect static files (Django admin + SPA) into STATIC_ROOT.
 # Use throwaway env values inline so they exist only during this RUN —

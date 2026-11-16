@@ -33,6 +33,11 @@ class IsAdminOrReadOnly(permissions.BasePermission):
         user = request.user
         if user is None or not user.is_authenticated:
             return False
+        # Belt and braces: the staff authentication class can only ever
+        # produce staff principals, but if a customer principal reached a
+        # dashboard view some other way it must still get nothing.
+        if getattr(user, "principal_type", "staff") != "staff":
+            return False
         if request.method in permissions.SAFE_METHODS:
             return True
         # All non-safe verbs (POST/PATCH/PUT/DELETE + custom @action writes)

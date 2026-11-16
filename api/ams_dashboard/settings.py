@@ -17,6 +17,17 @@ env = environ.Env(
     COGNITO_REGION=(str, ""),
     COGNITO_USER_POOL_ID=(str, ""),
     COGNITO_APP_CLIENT_ID=(str, ""),
+    # Customer portal — a second, separate user pool (same region). Empty
+    # means the portal is not enabled in this environment.
+    PORTAL_COGNITO_USER_POOL_ID=(str, ""),
+    PORTAL_COGNITO_APP_CLIENT_ID=(str, ""),
+    # Hostname the portal SPA is served on, e.g. portal.example.com. When
+    # set, requests are split by Host: see ams_dashboard/middleware.py.
+    PORTAL_HOST=(str, ""),
+    # Email domains that are never invited as customers (staff who appear
+    # in customer JIRA orgs).
+    PORTAL_STAFF_EMAIL_DOMAINS=(list, ["imt.ca"]),
+    PORTAL_MFA_ISSUER=(str, "AMS Customer Portal"),
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
@@ -34,6 +45,14 @@ COGNITO_REGION = env("COGNITO_REGION")
 COGNITO_USER_POOL_ID = env("COGNITO_USER_POOL_ID")
 COGNITO_APP_CLIENT_ID = env("COGNITO_APP_CLIENT_ID")
 
+PORTAL_COGNITO_USER_POOL_ID = env("PORTAL_COGNITO_USER_POOL_ID")
+PORTAL_COGNITO_APP_CLIENT_ID = env("PORTAL_COGNITO_APP_CLIENT_ID")
+PORTAL_HOST = env("PORTAL_HOST").strip().lower()
+PORTAL_STAFF_EMAIL_DOMAINS = [
+    d.strip().lower() for d in env("PORTAL_STAFF_EMAIL_DOMAINS") if d.strip()
+]
+PORTAL_MFA_ISSUER = env("PORTAL_MFA_ISSUER")
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -50,12 +69,15 @@ INSTALLED_APPS = [
     "analytics",
     "staff",
     "activities",
+    "portal",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     # WhiteNoise must come right after SecurityMiddleware.
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    # Splits dashboard and customer-portal traffic by hostname.
+    "ams_dashboard.middleware.PortalHostMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -113,8 +135,13 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 WEB_BUILD_DIR = BASE_DIR / "web_build"
+# The customer portal is a second Vite build (portal/), base '/static/portal/'.
+PORTAL_BUILD_DIR = BASE_DIR / "portal_build"
+STATICFILES_DIRS = []
 if WEB_BUILD_DIR.exists():
-    STATICFILES_DIRS = [WEB_BUILD_DIR]
+    STATICFILES_DIRS.append(WEB_BUILD_DIR)
+if PORTAL_BUILD_DIR.exists():
+    STATICFILES_DIRS.append(("portal", PORTAL_BUILD_DIR))
 
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},

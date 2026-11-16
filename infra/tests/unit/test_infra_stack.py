@@ -25,6 +25,7 @@ DOMAIN_CONTEXT = {
     "hosted_zone_name": "example.com",
     "jira_sync_enabled": "false",
     "aurora_auto_pause_minutes": "15",
+    "portal_enabled": "true",
 }
 
 
@@ -212,3 +213,104 @@ def test_environment_must_be_a_slug():
 def test_public_alb_with_domain_needs_no_http_override():
     # A domain counts as TLS, so the plain-HTTP guard must not fire.
     synth(DOMAIN_CONTEXT)
+
+
+# ── customer portal identity layer ──
+
+def test_prod_has_only_the_staff_pool(prod_template):
+    prod_template.resource_count_is("AWS::Cognito::UserPool", 1)
+    prod_template.resource_count_is("AWS::Cognito::UserPoolClient", 1)
+    assert "PORTAL_" not in str(prod_template.to_json())
+
+
+def test_dev_has_a_separate_customer_pool_with_mandatory_totp(dev_template):
+    dev_template.resource_count_is("AWS::Cognito::UserPool", 2)
+    dev_template.has_resource_properties(
+        "AWS::Cognito::UserPool",
+        {
+            "UserPoolName": "ams-portal-personal-dev",
+            "MfaConfiguration": "ON",
+            "EnabledMfas": ["SOFTWARE_TOKEN_MFA"],
+            "AdminCreateUserConfig": assertions.Match.object_like(
+                {"AllowAdminCreateUserOnly": True}
+            ),
+            "Policies": {
+                "PasswordPolicy": assertions.Match.object_like({"MinimumLength": 12})
+            },
+        },
+    )
+
+
+def test_portal_invitation_email_points_at_the_portal(dev_template):
+    pools = dev_template.find_resources(
+        "AWS::Cognito::UserPool", {"Properties": {"UserPoolName": "ams-portal-personal-dev"}}
+    )
+    (pool,) = pools.values()
+    body = pool["Properties"]["AdminCreateUserConfig"]["InviteMessageTemplate"]["EmailMessage"]
+    assert "https://portal.ams-dev.example.com" in body
+    assert "{username}" in body and "{####}" in body
+
+
+def test_portal_client_is_public_password_flow_with_short_refresh(dev_template):
+    dev_template.has_resource_properties(
+        "AWS::Cognito::UserPoolClient",
+        {
+            "ExplicitAuthFlows": ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"],
+            "GenerateSecret": False,
+            "PreventUserExistenceErrors": "ENABLED",
+            "EnableTokenRevocation": True,
+            "RefreshTokenValidity": 1440,
+        },
+    )
+
+
+def test_portal_hostname_aliases_the_same_alb(dev_template):
+    dev_template.has_resource_properties(
+        "AWS::Route53::RecordSet",
+        {"Name": "portal.ams-dev.example.com.", "Type": "A"},
+    )
+    dev_template.resource_count_is("AWS::ElasticLoadBalancingV2::LoadBalancer", 1)
+
+
+def test_api_containers_get_portal_settings(dev_template):
+    dev_template.has_resource_properties(
+        "AWS::ECS::TaskDefinition",
+        {
+            "ContainerDefinitions": assertions.Match.array_with(
+                [
+                    assertions.Match.object_like(
+                        {
+                            "Environment": assertions.Match.array_with(
+                                [
+                                    {"Name": "PORTAL_HOST", "Value": "portal.ams-dev.example.com"},
+                                    {"Name": "PORTAL_STAFF_EMAIL_DOMAINS", "Value": "imt.ca"},
+                                ]
+                            )
+                        }
+                    )
+                ]
+            )
+        },
+    )
+
+
+def test_api_task_role_may_only_administer_the_portal_pool(dev_template):
+    policies = dev_template.find_resources("AWS::IAM::Policy")
+    statements = [
+        s
+        for p in policies.values()
+        for s in p["Properties"]["PolicyDocument"]["Statement"]
+        if any("cognito-idp" in a for a in ([s["Action"]] if isinstance(s["Action"], str) else s["Action"]))
+    ]
+    assert len(statements) == 1
+    (stmt,) = statements
+    assert sorted(stmt["Action"]) == [
+        "cognito-idp:AdminCreateUser",
+        "cognito-idp:AdminDisableUser",
+        "cognito-idp:AdminEnableUser",
+        "cognito-idp:AdminGetUser",
+        "cognito-idp:AdminUserGlobalSignOut",
+    ]
+    # Scoped to one pool's ARN (a GetAtt on the portal pool), never "*".
+    assert stmt["Resource"] != "*"
+    assert "PortalUserPool" in str(stmt["Resource"])

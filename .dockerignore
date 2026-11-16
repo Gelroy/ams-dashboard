@@ -18,6 +18,9 @@ api/.venv
 web/node_modules
 web/dist
 web/.vite
+portal/node_modules
+portal/dist
+portal/.vite
 
 # Local env (never bake secrets into the image)
 .env

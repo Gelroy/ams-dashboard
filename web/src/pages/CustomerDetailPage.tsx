@@ -7,6 +7,9 @@ import {
   getOrganization,
   listBaskets,
   listOrgUsers,
+  apiErrorDetail,
+  portalUserAction,
+  type PortalUserAction,
   listPatchHistory,
   updateOrganization,
   updateOrgDocument,
@@ -595,6 +598,36 @@ function UsersSection({
       .finally(() => setSavingId(null))
   }
 
+  // Customer Portal access. Invite and disable have visible consequences
+  // for the customer (an email, an immediate sign-out), so both confirm.
+  const [portalBusyId, setPortalBusyId] = useState<string | null>(null)
+  const runPortalAction = (u: OrgUser, action: PortalUserAction) => {
+    const email = u.local_email || u.email || 'this user'
+    if (
+      action === 'invite' &&
+      !window.confirm(
+        `Send a Customer Portal invitation to ${email}?\n\n` +
+          'They will receive an email with a temporary password.',
+      )
+    ) {
+      return
+    }
+    if (
+      action === 'disable' &&
+      !window.confirm(`Disable portal access for ${email}? They are signed out immediately.`)
+    ) {
+      return
+    }
+    setPortalBusyId(u.id)
+    setError(null)
+    portalUserAction(orgId, u.id, action)
+      .then((updated) => {
+        onUsersChanged(users.map((x) => (x.id === u.id ? updated : x)))
+      })
+      .catch((e: unknown) => setError(apiErrorDetail(e)))
+      .finally(() => setPortalBusyId(null))
+  }
+
   const copyEmailsForFlag = (
     flag: 'alerts_enabled' | 'is_primary' | 'ams_report',
     label: string,
@@ -682,6 +715,9 @@ function UsersSection({
                 >
                   AMS Report <span className="meta">⧉</span>
                 </th>
+                <th style={{ width: 190 }} title="Customer Portal access">
+                  Portal
+                </th>
                 <th style={{ width: 60 }}>Hide</th>
               </tr>
             </thead>
@@ -765,6 +801,13 @@ function UsersSection({
                       onChange={(e) => patchUser(u.id, { ams_report: e.target.checked })}
                     />
                   </td>
+                  <td>
+                    <PortalCell
+                      user={u}
+                      busy={portalBusyId === u.id}
+                      onAction={(action) => runPortalAction(u, action)}
+                    />
+                  </td>
                   <td style={{ textAlign: 'center' }}>
                     <input
                       type="checkbox"
@@ -780,6 +823,65 @@ function UsersSection({
         </div>
       )}
     </>
+  )
+}
+
+/** Portal status + the one or two actions that make sense in that state. */
+function PortalCell({
+  user,
+  busy,
+  onAction,
+}: {
+  user: OrgUser
+  busy: boolean
+  onAction: (action: PortalUserAction) => void
+}) {
+  const account = user.portal_account
+  const hasEmail = Boolean(user.local_email || user.email)
+  const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : '—')
+
+  if (!account) {
+    return (
+      <button
+        className="btn-link"
+        disabled={busy || !hasEmail}
+        onClick={() => onAction('invite')}
+        title={
+          hasEmail
+            ? 'Email this user an invitation to the Customer Portal'
+            : 'Add an email address before inviting this user'
+        }
+      >
+        {busy ? 'Inviting…' : 'Invite to Portal'}
+      </button>
+    )
+  }
+
+  const label = { invited: 'Invited', active: 'Active', disabled: 'Disabled' }[account.status]
+  const title =
+    `${account.email}\nInvited ${fmt(account.invited_at)}` +
+    (account.invited_by ? ` by ${account.invited_by}` : '') +
+    `\nLast sign-in: ${fmt(account.last_login_at)}`
+  return (
+    <span className="portal-cell">
+      <span className={`badge badge-portal-${account.status}`} title={title}>
+        {label}
+      </span>
+      {account.status === 'invited' && (
+        <button className="btn-link" disabled={busy} onClick={() => onAction('resend')}>
+          Resend
+        </button>
+      )}
+      {account.status === 'disabled' ? (
+        <button className="btn-link" disabled={busy} onClick={() => onAction('enable')}>
+          Enable
+        </button>
+      ) : (
+        <button className="btn-link" disabled={busy} onClick={() => onAction('disable')}>
+          Disable
+        </button>
+      )}
+    </span>
   )
 }
 

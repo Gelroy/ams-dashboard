@@ -71,6 +71,17 @@ export interface OrgUser {
   is_primary: boolean
   ams_report: boolean
   is_hidden: boolean
+  // Customer Portal access, or null if this user was never invited.
+  // Changed only through the portal-* actions (see api.ts).
+  portal_account: PortalAccountInfo | null
+}
+
+export interface PortalAccountInfo {
+  status: 'invited' | 'active' | 'disabled'
+  email: string
+  invited_at: string
+  invited_by: string | null
+  last_login_at: string | null
 }
 
 export interface Paginated<T> {

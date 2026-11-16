@@ -6,6 +6,9 @@ from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from portal import services as portal_services
+from portal.models import PortalAccount
+
 from .models import AmsLevel, Environment, Organization, OrgDocument, OrgUser, Server
 from .serializers import (
     EnvironmentSerializer,
@@ -91,11 +94,53 @@ class OrgUserViewSet(
     serializer_class = OrgUserSerializer
 
     def get_queryset(self):
-        qs = OrgUser.objects.select_related("organization").order_by("display_name")
+        qs = OrgUser.objects.select_related("organization", "portal_account").order_by(
+            "display_name"
+        )
         org_pk = self.kwargs.get("organization_pk")
         if org_pk:
             qs = qs.filter(organization_id=org_pk)
         return qs
+
+    # ── Customer portal access ─────────────────────────────────────────
+    # POST-only, so the default IsAdminOrReadOnly limits these to admins.
+    # Business rules live in portal/services.py.
+
+    def _portal_action(self, fn, *, needs_account: bool):
+        org_user = self.get_object()
+        try:
+            if needs_account:
+                account = PortalAccount.objects.filter(org_user=org_user).first()
+                if account is None:
+                    return Response(
+                        {"detail": "This user has no portal account."}, status=404
+                    )
+                fn(account)
+            else:
+                fn(org_user)
+        except portal_services.PortalActionError as e:
+            return Response({"detail": e.message}, status=e.status)
+        # Re-read so the response reflects the new portal_account state.
+        return Response(self.get_serializer(self.get_queryset().get(pk=org_user.pk)).data)
+
+    @action(detail=True, methods=["post"], url_path="portal-invite")
+    def portal_invite(self, request, organization_pk=None, pk=None):
+        return self._portal_action(
+            lambda org_user: portal_services.invite(org_user, invited_by=request.user),
+            needs_account=False,
+        )
+
+    @action(detail=True, methods=["post"], url_path="portal-resend")
+    def portal_resend(self, request, organization_pk=None, pk=None):
+        return self._portal_action(portal_services.resend, needs_account=True)
+
+    @action(detail=True, methods=["post"], url_path="portal-disable")
+    def portal_disable(self, request, organization_pk=None, pk=None):
+        return self._portal_action(portal_services.disable, needs_account=True)
+
+    @action(detail=True, methods=["post"], url_path="portal-enable")
+    def portal_enable(self, request, organization_pk=None, pk=None):
+        return self._portal_action(portal_services.enable, needs_account=True)
 
 
 class EnvironmentViewSet(SoftDeleteDestroyMixin, viewsets.ModelViewSet):
