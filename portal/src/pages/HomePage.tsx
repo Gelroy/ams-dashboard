@@ -1,21 +1,23 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 
-import { getHome, getMe, signOut, type Home, type Me } from '../api'
+import { getDocuments, getHome, getMe, type Home, type Me, type PortalDocument } from '../api'
+import { Shell } from '../components/Shell'
 
 export function HomePage() {
-  const navigate = useNavigate()
   const [me, setMe] = useState<Me | null>(null)
   const [home, setHome] = useState<Home | null>(null)
+  const [documents, setDocuments] = useState<PortalDocument[]>([])
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([getMe(), getHome()])
-      .then(([m, h]) => {
+    Promise.all([getMe(), getHome(), getDocuments()])
+      .then(([m, h, d]) => {
         if (cancelled) return
         setMe(m)
         setHome(h)
+        setDocuments(d)
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load the portal.')
@@ -25,30 +27,12 @@ export function HomePage() {
     }
   }, [])
 
-  async function onSignOut() {
-    await signOut()
-    navigate('/login', { replace: true })
-  }
-
   const org = home?.organization
   const totalServers = home?.environments.reduce((n, e) => n + e.server_count, 0) ?? 0
 
   return (
-    <div className="shell">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          AMS Customer Portal
-        </div>
-        <div className="who">
-          {me && <span className="who-email">{me.email}</span>}
-          <button type="button" className="quiet" onClick={onSignOut}>
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      <main className="page">
+    <Shell email={me?.email ?? null}>
+      <>
         {error && (
           <p className="error" role="alert">
             {error}
@@ -121,14 +105,29 @@ export function HomePage() {
               </section>
             </div>
 
+            <section className="card latest">
+              <h2>Latest report</h2>
+              {documents.length === 0 ? (
+                <p className="muted">
+                  Your monthly AMS reports will appear here once they are published.
+                </p>
+              ) : (
+                <p>
+                  <strong>{documents[0].period_label}</strong> · {documents[0].title}.{' '}
+                  <Link to="/documents">
+                    {documents.length === 1 ? 'Open it in Documents' : `See all ${documents.length} reports`}
+                  </Link>
+                </p>
+              )}
+            </section>
+
             <p className="muted note">
               Signed in as {me.email}
-              {me.role ? ` · ${me.role}` : ''}. Reports and support requests will appear here as
-              they become available.
+              {me.role ? ` · ${me.role}` : ''}.
             </p>
           </>
         )}
-      </main>
-    </div>
+      </>
+    </Shell>
   )
 }

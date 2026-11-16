@@ -32,3 +32,7 @@ web/.vite/
 # CDK
 infra/cdk.out/
 infra/cdk.context.json
+
+# Locally stored report PDFs (dev only)
+api/var/
+api/local.sqlite3

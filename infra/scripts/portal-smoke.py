@@ -114,6 +114,17 @@ class Http:
             parsed = json.loads(raw)
         return status, parsed
 
+    def raw(self, path: str, *, token: str | None = None) -> tuple[int, str, bytes]:
+        """GET returning the body untouched (for PDFs)."""
+        req = urllib.request.Request(self.base + path, method="GET")
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req, timeout=60, context=TLS) as r:
+                return r.status, r.headers.get("Content-Type", ""), r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers.get("Content-Type", ""), e.read()
+
 
 class Smoke:
     def __init__(self):
@@ -164,6 +175,7 @@ def main() -> int:
     created_staff = False
     invited_user = None  # (org_id, user_id, original local_email)
     customer_sub = None
+    report_ids: list[str] = []
 
     try:
         print(f"→ environment {args.env}: {dash.base} / {portal.base}")
@@ -287,6 +299,86 @@ def main() -> int:
         s.check("access token refused by portal API",
                 portal.call("GET", "/api/portal/me", token=tokens["access_token"])[0] == 401)
 
+        # ── reports and documents ─────────────────────────────────────
+        # Uses months far in the past so it never collides with a real
+        # report; everything created here is deleted in Cleanup.
+        print("Reports and documents")
+        marker = "[[Ticket summary: to be written before approval]]"
+
+        def draft_for(organization: dict, period: str) -> dict | None:
+            body = {"organization": organization["id"], "period": period}
+            st, report = dash.call("POST", "/api/reports/", token=staff_token, body=body)
+            if st == 409:  # left over from an interrupted run
+                _, old = dash.call(
+                    "GET", f"/api/reports/?organization={organization['id']}&period={period}",
+                    token=staff_token)
+                for r in old or []:
+                    dash.call("DELETE", f"/api/reports/{r['id']}/", token=staff_token)
+                st, report = dash.call("POST", "/api/reports/", token=staff_token, body=body)
+            if st != 201:
+                return None
+            report_ids.append(report["id"])
+            return report
+
+        def approve(report: dict) -> tuple[int, dict | None]:
+            sections = [{**x, "body": x["body"].replace(marker, "Smoke test: nothing to report.")}
+                        for x in report["sections"]]
+            dash.call("PATCH", f"/api/reports/{report['id']}/", token=staff_token,
+                      body={"title": report["title"], "sections": sections})
+            return dash.call("POST", f"/api/reports/{report['id']}/approve/", token=staff_token)
+
+        mine = draft_for(org, "2020-01")
+        if not s.check("staff generates a draft from the template",
+                       bool(mine) and mine["status"] == "draft" and len(mine["sections"]) >= 1):
+            return 1
+        s.check("draft has the customer's name filled in",
+                org["display_name"] in mine["sections"][0]["body"])
+        st, ctype, pdf = dash.raw(f"/api/reports/{mine['id']}/pdf/", token=staff_token)
+        s.check("staff can preview the draft as a PDF",
+                st == 200 and "pdf" in ctype and pdf.startswith(b"%PDF"), f"{st} {ctype}")
+        st, docs = portal.call("GET", "/api/portal/documents", token=cust_token)
+        s.check("draft is not listed in the portal",
+                st == 200 and mine["id"] not in [d["id"] for d in docs], f"{st}")
+        s.check("draft cannot be downloaded by id",
+                portal.raw(f"/api/portal/documents/{mine['id']}/download", token=cust_token)[0] == 404)
+        if marker in "".join(x["body"] for x in mine["sections"]):
+            st, _ = dash.call("POST", f"/api/reports/{mine['id']}/approve/", token=staff_token)
+            s.check("approval is refused while the ticket summary is unwritten", st == 409, f"{st}")
+        st, done = approve(mine)
+        s.check("approve publishes the report",
+                st == 200 and done["status"] == "approved" and done["pdf_size"] > 0, f"{st} {done}")
+        s.check("no email actually leaves a synthetic environment",
+                all(n["status"] != "sent" for n in (done or {}).get("notifications", [])))
+        st, _ = dash.call("PATCH", f"/api/reports/{mine['id']}/", token=staff_token,
+                          body={"title": "changed"})
+        s.check("approved report can no longer be edited", st == 409, f"{st}")
+
+        theirs = draft_for(other_org, "2020-01")
+        st, _ = approve(theirs) if theirs else (0, None)
+        s.check("a second customer's report is approved too", st == 200, f"{st}")
+
+        st, docs = portal.call("GET", "/api/portal/documents", token=cust_token)
+        ids = [d["id"] for d in docs or []]
+        s.check("customer sees their approved report", st == 200 and mine["id"] in ids, f"{st}")
+        s.check("customer does not see the other customer's report",
+                bool(theirs) and theirs["id"] not in ids)
+        st, ctype, pdf = portal.raw(f"/api/portal/documents/{mine['id']}/download", token=cust_token)
+        s.check("customer downloads their PDF",
+                st == 200 and "pdf" in ctype and pdf.startswith(b"%PDF")
+                and len(pdf) == done["pdf_size"], f"{st} {ctype} {len(pdf)}")
+        if theirs:
+            s.check("other customer's PDF is not downloadable by id",
+                    portal.raw(f"/api/portal/documents/{theirs['id']}/download",
+                               token=cust_token)[0] == 404)
+        s.check("customer token refused by the staff report API",
+                dash.raw(f"/api/reports/{mine['id']}/pdf/", token=cust_token)[0] == 401)
+        s.check("documents need a token",
+                portal.raw(f"/api/portal/documents/{mine['id']}/download")[0] == 401)
+        st, _ = dash.call("DELETE", f"/api/reports/{mine['id']}/", token=staff_token)
+        s.check("deleting the report removes it from the portal",
+                st == 204 and portal.raw(f"/api/portal/documents/{mine['id']}/download",
+                                         token=cust_token)[0] == 404, f"{st}")
+
         # ── returning sign-in ─────────────────────────────────────────
         print("Returning sign-in")
         st, step = portal.call("POST", "/api/portal/auth/login",
@@ -330,6 +422,10 @@ def main() -> int:
                 if st == 200:
                     dash.call("PATCH", f"/api/organizations/{org_id}/users/{user_id}/",
                               token=body["id_token"], body={"local_email": original})
+                    for report_id in report_ids:
+                        dash.call("DELETE", f"/api/reports/{report_id}/", token=body["id_token"])
+                    if report_ids:
+                        print(f"  ✓ deleted {len(report_ids)} throwaway report(s)")
             except Exception as e:  # noqa: BLE001
                 print(f"  ! could not restore the synthetic user's email: {e}")
         for pool, username, label in ((portal_pool, customer_email, "customer"),

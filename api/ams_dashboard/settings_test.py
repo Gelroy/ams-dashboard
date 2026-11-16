@@ -25,5 +25,7 @@ os.environ["PORTAL_COGNITO_USER_POOL_ID"] = "us-test-1_PORTALPOOL"
 os.environ["PORTAL_COGNITO_APP_CLIENT_ID"] = "portal-client-id"
 os.environ["PORTAL_HOST"] = ""
 os.environ["PORTAL_STAFF_EMAIL_DOMAINS"] = "imt.ca"
+os.environ["REPORTS_BUCKET"] = ""
+os.environ["PORTAL_EMAIL_MODE"] = "log"
 
 from .settings import *  # noqa: E402, F401, F403

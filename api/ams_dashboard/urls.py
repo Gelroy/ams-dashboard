@@ -36,6 +36,7 @@ urlpatterns = [
     path("api/", include("analytics.urls")),
     path("api/", include("staff.urls")),
     path("api/", include("activities.urls")),
+    path("api/", include("reports.urls")),
     # Customer portal — its own authentication class (customer user pool).
     path("api/portal/", include("portal.urls")),
     # SPA fallback — must be last; matches every path not consumed above.

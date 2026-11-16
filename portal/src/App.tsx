@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { getToken } from './auth'
+import { DocumentsPage } from './pages/DocumentsPage'
 import { HomePage } from './pages/HomePage'
 import { LoginPage } from './pages/LoginPage'
 import { MfaSetupPage } from './pages/MfaSetupPage'
@@ -24,6 +25,14 @@ export default function App() {
         element={
           <RequireAuth>
             <HomePage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/documents"
+        element={
+          <RequireAuth>
+            <DocumentsPage />
           </RequireAuth>
         }
       />

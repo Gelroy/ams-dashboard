@@ -289,7 +289,9 @@ api/
 ├── patching/                         # Patch plans + executions + history
 ├── analytics/                        # Per-customer metric definitions + captures
 ├── staff/                            # Internal team + SME assignments
-└── activities/                       # Calendar + critical events aggregation
+├── activities/                       # Calendar + critical events aggregation
+├── portal/                           # Customer portal: accounts, sign-in relay, customer-scoped API
+└── reports/                          # Monthly reports: templates, metrics, draft → approved, PDF
 ```
 
 ### 4.2 Configuration (`api/ams_dashboard/settings.py`)
@@ -792,6 +794,7 @@ A single class that wires up the entire application. Major sections, in order:
 | `api_desired_count` | int | `1` | Number of API tasks; `0` parks the environment |
 | `portal_enabled` | bool | `false` | Customer Portal identity layer: separate customer Cognito pool (mandatory TOTP), app client, IAM grant for invites, `portal.<domain_name>` alias. See `docs/CUSTOMER_PORTAL.md` §10 |
 | `portal_staff_email_domains` | csv | `imt.ca` | Domains that may never be invited as customers |
+| `portal_email_from` | email | unset | Sender for customer emails. Set = send via SES from this address (must be a verified identity); unset = recipients are only recorded. With `portal_enabled` the stack also creates the private reports bucket. See `docs/CUSTOMER_PORTAL.md` §11 |
 
 ---
 

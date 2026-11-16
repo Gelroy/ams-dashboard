@@ -22,6 +22,7 @@ the company account (or vice versa).
 | `API_DESIRED_COUNT` | API tasks to run; `0` parks the environment |
 | `PORTAL_ENABLED` | `true` creates the customer Cognito pool and `portal.<DOMAIN_NAME>` |
 | `PORTAL_STAFF_EMAIL_DOMAINS` | Comma-separated domains never invited as customers (default `imt.ca`) |
+| `PORTAL_EMAIL_FROM` | Sender for customer emails ("your report is ready"). Must be a verified SES identity. Unset = nothing is sent; recipients are only recorded |
 
 Files are plain `KEY=value` lines (sourced by bash) — no quotes needed, no
 secrets allowed.

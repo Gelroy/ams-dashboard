@@ -129,10 +129,10 @@ invited)`. Mandatory MFA is recommended for the customer pool.
   Invite-to-Portal on Customer Detail, dual-issuer JWT auth, portal SPA
   shell (login, forced password change, MFA setup, "my customer" home),
   isolation test suite.
-- **Phase 2 — Documents (MVP demo target).** S3 bucket + upload from
-  Customer Detail (category e.g. "AMS Monthly Report" + period), portal
-  document list + presigned download, optional "new report" email
-  (reuse the `ams_report` flag as the recipient filter).
+- **Phase 2 — Documents (MVP demo target).** Re-scoped 2026-11-16 from
+  "upload a PDF" to generated monthly reports: editable templates with
+  tags, draft → approved workflow, PDF in S3, portal Documents screen,
+  email on approval (the `ams_report` flag picks recipients). See §11.
 - **Phase 3 — Tickets & alerts.** Ticket / comment / attachment models,
   status workflow, staff queue view inside the dashboard, portal create
   + thread view, optional JIRA mirror; dashboard-pushed alerts.
@@ -142,9 +142,8 @@ invited)`. Mandatory MFA is recommended for the customer pool.
 
 ## 7. Open questions (not yet answered)
 
-- **Documents:** where do the monthly AMS reports come from today (manual
-  PDFs, a tool export, something the dashboard could generate)? Format
-  and size? Email notification on publish?
+- ~~**Documents:** where do the monthly AMS reports come from today?
+  Format? Email notification on publish?~~ Answered 2026-11-16 — see §11.
 - **JSM scope:** which features are actually used — create/comment/
   attach/status only, or also SLAs, approvals, email-to-ticket, canned
   responses, reporting? Migrate historical tickets or start clean?
@@ -345,6 +344,157 @@ stack is untouched; just rerun `deploy.sh`.
   no `AUTH_BYPASS` equivalent for portal endpoints (on purpose). Use
   `PORTAL_API_TARGET=https://portal.ams-dev.getshaking.live npm run dev`.
 
-**Next:** Phase 2 — Documents (private S3 bucket, staff upload from
-Customer Detail, portal list + presigned download). The §7 questions about
-where the monthly AMS reports come from and their format are now blocking.
+**Next:** Phase 2 — see §11.
+
+## 11. Phase 2 — Monthly reports (2026-11-16)
+
+Phase 2 was planned as "staff upload a PDF". The answers to the §7
+document questions (2026-11-16) changed it into a **report generator**:
+
+1. A report has several sections fed from different places: a mostly
+   generic header, monitoring metrics delivered monthly from Zabbix
+   (assumed JSON), a JIRA ticket summary (may need an AI step later), and
+   System Software & Patch Planning from the dashboard.
+2. Header and section text come from **editable templates** that mix
+   fixed wording with tags, e.g. `This report was generated for
+   {customerName} on {dateTime}.`
+3. Reports are delivered as **PDF**.
+4. A generated report starts as **DRAFT**; when it is **APPROVED** the
+   customer is emailed.
+
+Deployed to `personal-dev` and verified live 2026-11-16: migrations
+`reports.0001`–`0002` applied, synthetic report data seeded, live smoke
+52/52 (including a real S3 round trip for report PDFs). Reports bucket:
+`amsdashboardpersonaldev-reportsbucket4e7c5994-x0ztren47ntp`.
+
+### How it works
+
+```
+template ─┐
+metrics ──┼─► generate ─► DRAFT ─► staff edit / preview ─► approve ─► APPROVED
+dashboard ┘                                                  │
+                                           PDF stored in S3 ─┤─► portal Documents
+                                           email (link only) ┘
+```
+
+| Piece | Where | Notes |
+|---|---|---|
+| Models | `api/reports/models.py` | `ReportTemplate` (ordered sections of template text; exactly one default), `MetricsDelivery` (one JSON payload per customer per month; re-delivery replaces), `Report` (one live report per customer per month; sections hold the *filled* text), `ReportNotification` |
+| Tag language | `api/reports/templating.py` | `{path}`, filters `round:N` `default:text` `date` `upper` `lower`, `{#each list}…{#else}…{/each}`, `{#if value}…{#else}…{/if}`. Reads dictionary keys only — no attribute access or calls. An unknown tag is left visible and reported |
+| Layout markup | `api/reports/markup.py` | `## heading`, `- bullet`, `**bold**`, `\| cell \| cell \|` table rows. `[[text]]` marks something staff must still write |
+| Data for tags | `api/reports/context.py` | Everything is queried by the one organization passed in. `metrics.*` is the delivered JSON as-is, so templates map any shape |
+| Ticket summary | `api/reports/tickets.py` | Seam for the future JIRA + AI summariser. Returns nothing today, so drafts carry a `[[Ticket summary…]]` marker |
+| PDF | `api/reports/pdf.py` | ReportLab (pure Python, no system libraries). Drafts are watermarked |
+| Workflow | `api/reports/services.py` | `generate`, `update_draft`, `regenerate`, `approve`. Approval is refused while any `{tag}` or `[[marker]]` remains |
+| Storage | `api/reports/storage.py` | S3 bucket `REPORTS_BUCKET` (private, encrypted, TLS-only, versioned); local disk when unset |
+| Email | `api/reports/notifications.py` | Link to the portal only — never the report. `PORTAL_EMAIL_MODE=log` (default) records recipients and sends nothing; `ses` sends from `PORTAL_EMAIL_FROM` |
+| Staff API | `api/reports/views.py` | `/api/reports/`, `/api/report-templates/`, `/api/report-metrics/`. Viewers read and preview; admins generate, edit, approve, delete |
+| Customer API | `api/portal/documents.py` | `/api/portal/documents` and `…/<id>/download`. Own organization, APPROVED only |
+| Staff screens | `web/src/pages/Report*.tsx` | **Reports** (month overview, upload metrics, generate drafts), report review (edit, preview, approve), **Report Templates** (editor with tag reference and live preview) |
+| Customer screen | `portal/src/pages/DocumentsPage.tsx` | List, view, download |
+| Infra | `infra/infra/infra_stack.py` | `ReportsBucket`; API role may put and get objects there, nothing else; optional `portal_email_from` adds `ses:SendEmail` limited to that sender |
+
+### Tags
+
+The reference is built into the template editor (and `defaults.py`):
+`customerName`, `dateTime`, `customer.*`, `report.*`, `metrics.*`,
+`tickets.*`, `software.*`, `patching.*`, `certificates.*`. The default
+template ("Standard monthly report", installed by migration) uses all of
+them and is the best worked example.
+
+### Decisions taken
+
+- **Who is emailed:** the customer's *active* portal users who have the
+  existing **AMS report** box ticked on Customer Detail. The approve
+  dialog lists them first.
+- **One report per customer per month.** Deleting a report (admin) hides
+  it from the portal at once and frees the month for a new one.
+- **Approved means frozen.** No edit, no regenerate. To correct one:
+  delete it and generate again.
+- **The PDF is streamed through the API**, not handed out as a storage
+  link, so the customer's organization is checked on every download.
+- **Draft content is a snapshot.** Editing a template never changes
+  drafts or reports that already exist.
+- **Monitoring JSON shape is not fixed in code.** The seeded shape
+  (`availability`, `alerts`, `hosts[]`, `topProblems[]`) is an assumption;
+  when the real Zabbix export exists, edit the template's tags to match.
+
+### Tests
+
+`cd api && .venv/bin/pytest` — 160 tests. The 54 in `reports/tests.py`
+start with isolation: a customer sees only their own approved reports
+(by list and by guessed id), report content holds only that customer's
+data, and only that customer's flagged users are notified. Four guards
+were mutation-checked (approved-only filter, organization filter on
+installed software, organization filter on recipients, month filter on
+metrics): removing any one fails tests.
+
+`infra/scripts/portal-smoke.py --env personal-dev` now also generates,
+approves, downloads and deletes throwaway reports (months 2020-01) for
+two customers against the live stack.
+
+### Running it in personal-dev
+
+```
+infra/scripts/run-task.sh --env personal-dev migrate --noinput
+infra/scripts/run-task.sh --env personal-dev seed_synthetic_reports
+```
+
+`seed_synthetic_reports` adds a fictional software catalog, installed
+software, patch history, planned patching and three months of monitoring
+metrics for the six synthetic customers (the last one has no metrics for
+the latest month, to show the "not received" case). Then in the
+dashboard: **Reports → Generate missing drafts**.
+
+`manage.py generate_reports [--period YYYY-MM]` does the same from the
+command line and only creates what is missing, so it can go on a monthly
+schedule later.
+
+### Looking at the staff screens locally
+
+No Cognito needed — SQLite, synthetic data, authentication bypassed:
+
+```
+cd api
+export DATABASE_URL=sqlite:///$PWD/local.sqlite3 AUTH_BYPASS=1 DEBUG=True SECRET_KEY=local
+.venv/bin/python manage.py migrate && .venv/bin/python manage.py seed_synthetic \
+  && .venv/bin/python manage.py seed_synthetic_reports
+.venv/bin/python manage.py runserver        # then, in web/:  npm run dev
+```
+
+The dashboard's route guard only looks for a token in the tab's session
+storage, so in the browser console run
+`sessionStorage.setItem('ams-dashboard-id-token', 'local')` and reload.
+Approved PDFs land in `api/var/reports/` (git-ignored). The portal has no
+such bypass, on purpose.
+
+### Open / not built yet
+
+- **How Zabbix delivers the metrics automatically.** Today: upload the
+  JSON per customer on the Reports screen, or `POST /api/report-metrics/`
+  as an admin. Unattended delivery needs a machine credential or an S3
+  drop folder plus a scheduled ingest — to decide once the Zabbix export
+  format and where it runs are known.
+- **JIRA ticket summary.** The dashboard only holds open-ticket *counts*.
+  A real summary needs ticket detail for the month (a JIRA query) and,
+  as discussed, probably an AI step to condense it. `tickets.py` is where
+  it plugs in; until then staff write the paragraph in the draft.
+- **Real email.** `log` mode everywhere so far. Turning on `ses` needs a
+  verified SES identity (and production access, or SES only delivers to
+  verified addresses).
+- **Monthly schedule** for `generate_reports` (EventBridge, like the JIRA
+  sync tasks).
+- **Withdrawing an approved report** other than by deleting it; a
+  download audit trail; per-customer template choice.
+- The non-prod bucket is removed with the stack but must be emptied first.
+
+### Deploy gotcha (2026-11-16)
+
+The first Phase 2 deploy rolled back after 25 minutes ("ECS Deployment
+Circuit Breaker was triggered"): `reportlab` had been installed locally
+but not added to `api/pyproject.toml`, so every request in the new
+container raised `ModuleNotFoundError`. The Dockerfile now runs
+`manage.py check` during the image build, which imports every app and the
+URL conf — a missing dependency fails the build in a minute instead of
+the rollout. To diagnose a rollback like this:
+`aws logs tail /ams-dashboard-personal-dev/api --since 1h --filter-pattern Traceback`.

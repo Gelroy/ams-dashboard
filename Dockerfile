@@ -65,7 +65,9 @@ RUN SECRET_KEY=build-time-throwaway \
     DATABASE_URL=postgres://x:x@localhost/x \
     DEBUG=False \
     AUTH_BYPASS=1 \
-    python manage.py collectstatic --noinput
+    sh -c "python manage.py check && python manage.py collectstatic --noinput"
+# `check` imports every app and the URL conf, so a dependency missing from
+# pyproject.toml fails the image build instead of the running service.
 
 # Drop privileges
 RUN groupadd --system app && useradd --system --gid app app \

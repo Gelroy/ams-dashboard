@@ -33,7 +33,7 @@ function buildHeaders(init: RequestInit | undefined, token: string | null): Head
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let r = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: buildHeaders(init, getToken()),
@@ -74,6 +74,36 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return undefined as T
   }
   return r.json() as Promise<T>
+}
+
+/** Like request(), for endpoints that answer with a file (report PDFs).
+ *  Goes through the same bearer token + silent-refresh path, so a PDF is
+ *  never fetched by a plain link the browser could open without auth. */
+export async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const call = (token: string | null) =>
+    fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: { ...buildHeaders(init, token), Accept: 'application/pdf' },
+    })
+  let r = await call(getToken())
+  if (r.status === 401) {
+    const newToken = await tryRefresh()
+    if (newToken) r = await call(newToken)
+    if (r.status === 401) {
+      clearTokenAndRedirectToLogin()
+      throw new Error('Unauthorized')
+    }
+  }
+  if (!r.ok) {
+    let detail = ''
+    try {
+      detail = ` — ${await r.text()}`
+    } catch {
+      // ignore
+    }
+    throw new Error(`HTTP ${r.status} ${r.statusText}${detail}`)
+  }
+  return r.blob()
 }
 
 // ── Auth endpoints — exposed for the LoginPage / NewPasswordPage. ─────

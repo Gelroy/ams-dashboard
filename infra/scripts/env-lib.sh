@@ -73,6 +73,9 @@ build_context_flags() {
     if [[ -n "${PORTAL_STAFF_EMAIL_DOMAINS:-}" ]]; then
       CONTEXT_FLAGS+=(-c "portal_staff_email_domains=$PORTAL_STAFF_EMAIL_DOMAINS")
     fi
+    if [[ -n "${PORTAL_EMAIL_FROM:-}" ]]; then
+      CONTEXT_FLAGS+=(-c "portal_email_from=$PORTAL_EMAIL_FROM")
+    fi
   fi
 }
 

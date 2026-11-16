@@ -25,12 +25,16 @@ const sections: NavSection[] = [
   },
   {
     label: 'Operations',
-    items: [{ to: '/patch-execution', label: 'Patch Execution' }],
+    items: [
+      { to: '/patch-execution', label: 'Patch Execution' },
+      { to: '/reports', label: 'Reports' },
+    ],
   },
   {
     label: 'Config',
     items: [
       { to: '/analytics', label: 'Analytics' },
+      { to: '/report-templates', label: 'Report Templates' },
       { to: '/staff', label: 'Staff' },
       { to: '/settings', label: 'Settings' },
     ],

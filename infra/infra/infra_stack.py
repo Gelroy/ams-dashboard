@@ -104,6 +104,19 @@ Optional context:
                               alias record. Default false.
   - portal_staff_email_domains : comma-separated domains that may never be
                               invited as customers (default 'imt.ca').
+  - portal_email_from       : sender address for customer emails ("your
+                              report is ready"). When set, the API sends
+                              through Amazon SES from this address and may
+                              call ses:SendEmail only with it as the
+                              sender; the address or its domain must be a
+                              verified SES identity in this account.
+                              Unset (default): nothing is sent — intended
+                              recipients are only recorded.
+
+With portal_enabled the stack also creates the reports bucket: private,
+encrypted, TLS-only, versioned. Approved report PDFs are stored there and
+are only ever read back by the API, which streams them to a signed-in
+customer after checking they belong to that customer's organization.
 
 Per-environment resource names: ``environment`` other than 'prod' is
 appended to the Cognito pool name and the CloudWatch log group names
@@ -131,10 +144,12 @@ from aws_cdk import (
     aws_ecs as ecs,
     aws_ecs_patterns as ecs_patterns,
     aws_elasticloadbalancingv2 as elbv2,
+    aws_iam as iam,
     aws_logs as logs,
     aws_rds as rds,
     aws_route53 as route53,
     aws_route53_targets as route53_targets,
+    aws_s3 as s3,
     aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
@@ -223,6 +238,9 @@ class AmsDashboardStack(cdk.Stack):
         # Customers reach the portal on its own hostname; without a domain
         # the pool still exists but there is no host split.
         portal_host = f"portal.{domain_name}" if (portal_enabled and domain_name) else ""
+        portal_email_from = str(self.node.try_get_context("portal_email_from") or "").strip()
+        if portal_email_from and not portal_enabled:
+            raise ValueError("portal_email_from needs portal_enabled=true.")
         if api_desired_count < 0:
             raise ValueError("api_desired_count must be 0 or more.")
         extra_tags_raw = self.node.try_get_context("tags") or "{}"
@@ -578,6 +596,24 @@ class AmsDashboardStack(cdk.Stack):
             removal_policy=RemovalPolicy.RETAIN,
         )
 
+        # ── Reports bucket (approved customer report PDFs) ─────────────
+        reports_bucket = None
+        if portal_enabled:
+            reports_bucket = s3.Bucket(
+                self,
+                "ReportsBucket",
+                block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+                encryption=s3.BucketEncryption.S3_MANAGED,
+                enforce_ssl=True,
+                versioned=True,
+                object_ownership=s3.ObjectOwnership.BUCKET_OWNER_ENFORCED,
+                # Delivered reports are records: keep them in prod. Elsewhere
+                # the bucket goes with the stack (empty it first).
+                removal_policy=(
+                    RemovalPolicy.RETAIN if environment == "prod" else RemovalPolicy.DESTROY
+                ),
+            )
+
         # Env + secrets are shared by API and sync tasks.
         common_env = {
             "DEBUG": "False",
@@ -595,6 +631,9 @@ class AmsDashboardStack(cdk.Stack):
                     "PORTAL_COGNITO_APP_CLIENT_ID": portal_client.user_pool_client_id,
                     "PORTAL_HOST": portal_host,
                     "PORTAL_STAFF_EMAIL_DOMAINS": portal_staff_domains,
+                    "REPORTS_BUCKET": reports_bucket.bucket_name,
+                    "PORTAL_EMAIL_MODE": "ses" if portal_email_from else "log",
+                    "PORTAL_EMAIL_FROM": portal_email_from,
                 }
             )
         if domain_name:
@@ -698,6 +737,18 @@ class AmsDashboardStack(cdk.Stack):
                 "cognito-idp:AdminEnableUser",
                 "cognito-idp:AdminUserGlobalSignOut",
             )
+            # Reports: the API writes a PDF once (on approval) and reads it
+            # back for downloads. No delete, no list.
+            reports_bucket.grant_put(api_service.task_definition.task_role)
+            reports_bucket.grant_read(api_service.task_definition.task_role)
+            if portal_email_from:
+                api_service.task_definition.task_role.add_to_principal_policy(
+                    iam.PolicyStatement(
+                        actions=["ses:SendEmail"],
+                        resources=["*"],
+                        conditions={"StringEquals": {"ses:FromAddress": portal_email_from}},
+                    )
+                )
             if portal_host and hosted_zone is not None:
                 # Same ALB, same wildcard certificate; Django splits the two
                 # hostnames (api/ams_dashboard/middleware.py).
@@ -881,5 +932,6 @@ class AmsDashboardStack(cdk.Stack):
         if portal_pool is not None:
             cdk.CfnOutput(self, "PortalUserPoolId", value=portal_pool.user_pool_id)
             cdk.CfnOutput(self, "PortalAppClientId", value=portal_client.user_pool_client_id)
+            cdk.CfnOutput(self, "ReportsBucketName", value=reports_bucket.bucket_name)
             if portal_host:
                 cdk.CfnOutput(self, "PortalUrl", value=f"https://{portal_host}")

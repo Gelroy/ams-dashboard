@@ -28,6 +28,12 @@ env = environ.Env(
     # in customer JIRA orgs).
     PORTAL_STAFF_EMAIL_DOMAINS=(list, ["imt.ca"]),
     PORTAL_MFA_ISSUER=(str, "AMS Customer Portal"),
+    # Reports: approved PDFs go to this S3 bucket; empty = local disk.
+    REPORTS_BUCKET=(str, ""),
+    # Customer email on approval: "log" records recipients and sends
+    # nothing; "ses" sends through Amazon SES from PORTAL_EMAIL_FROM.
+    PORTAL_EMAIL_MODE=(str, "log"),
+    PORTAL_EMAIL_FROM=(str, ""),
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
@@ -53,6 +59,12 @@ PORTAL_STAFF_EMAIL_DOMAINS = [
 ]
 PORTAL_MFA_ISSUER = env("PORTAL_MFA_ISSUER")
 
+REPORTS_BUCKET = env("REPORTS_BUCKET")
+REPORTS_LOCAL_DIR = BASE_DIR / "var" / "reports"
+PORTAL_EMAIL_FROM = env("PORTAL_EMAIL_FROM")
+# Never send unless both the mode and a sender are configured.
+PORTAL_EMAIL_MODE = "ses" if env("PORTAL_EMAIL_MODE") == "ses" and PORTAL_EMAIL_FROM else "log"
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -70,6 +82,7 @@ INSTALLED_APPS = [
     "staff",
     "activities",
     "portal",
+    "reports",
 ]
 
 MIDDLEWARE = [

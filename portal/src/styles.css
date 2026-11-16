@@ -319,6 +319,64 @@ tfoot td {
   font-size: 14px;
 }
 
+/* ── Navigation and documents ────────────────────────────────────── */
+.topnav {
+  display: flex;
+  gap: 4px;
+  margin-right: auto;
+  margin-left: 12px;
+}
+.topnav a {
+  padding: 6px 12px;
+  border-radius: 8px;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 500;
+}
+.topnav a:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+.topnav a.active {
+  background: var(--bg);
+  color: var(--brand-ink);
+}
+.card.latest,
+.card.documents,
+.card.empty {
+  margin-top: 24px;
+}
+.card.latest p,
+.card.empty p {
+  margin: 0;
+}
+.card.empty p + p {
+  margin-top: 6px;
+}
+.card.documents {
+  overflow-x: auto;
+}
+.card.documents td {
+  vertical-align: middle;
+}
+.small {
+  font-size: 13px;
+}
+.doc-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.doc-actions button + button {
+  margin-left: 8px;
+}
+button.primary.compact {
+  padding: 6px 14px;
+}
+button.quiet:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 @media (max-width: 520px) {
   .topbar {
     padding: 12px 16px;

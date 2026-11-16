@@ -116,24 +116,29 @@ function tryRefresh(): Promise<string | null> {
   return refreshing
 }
 
-function authedFetch(path: string, token: string | null): Promise<Response> {
+function authedFetch(path: string, token: string | null, accept: string): Promise<Response> {
   return fetch(`${API}${path}`, {
-    headers: { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: { Accept: accept, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
   })
 }
 
-async function get<T>(path: string): Promise<T> {
-  let r = await authedFetch(path, getToken())
+/** GET with the bearer token, one silent refresh, then back to sign-in. */
+async function authed(path: string, accept: string): Promise<Response> {
+  let r = await authedFetch(path, getToken(), accept)
   if (r.status === 401) {
     const fresh = await tryRefresh()
-    if (fresh) r = await authedFetch(path, fresh)
+    if (fresh) r = await authedFetch(path, fresh, accept)
     if (r.status === 401) {
       clearTokens()
       window.location.replace('/login')
       throw new ApiError(401, 'Your session has ended. Please sign in again.')
     }
   }
-  return parse<T>(r)
+  return r
+}
+
+async function get<T>(path: string): Promise<T> {
+  return parse<T>(await authed(path, 'application/json'))
 }
 
 export interface Me {
@@ -155,5 +160,33 @@ export interface Home {
   environments: { name: string; server_count: number }[]
 }
 
+export interface PortalDocument {
+  id: string
+  title: string
+  /** "2026-10" */
+  period: string
+  /** "October 2026" */
+  period_label: string
+  published_at: string
+  size: number | null
+  filename: string
+}
+
 export const getMe = () => get<Me>('/me')
 export const getHome = () => get<Home>('/home')
+export const getDocuments = () => get<PortalDocument[]>('/documents')
+
+/** Fetch a document's PDF. It is requested with the bearer token like any
+ *  other call — there is no link that works without being signed in. */
+export async function getDocumentPdf(id: string): Promise<Blob> {
+  const r = await authed(`/documents/${encodeURIComponent(id)}/download`, 'application/pdf')
+  if (!r.ok) {
+    throw new ApiError(
+      r.status,
+      r.status === 404
+        ? 'This document is no longer available.'
+        : 'The document could not be opened. Please try again.',
+    )
+  }
+  return r.blob()
+}

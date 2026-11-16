@@ -16,6 +16,9 @@ import { LoginPage } from './pages/LoginPage'
 import { NewPasswordPage } from './pages/NewPasswordPage'
 import { PatchExecutionPage } from './pages/PatchExecutionPage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
+import { ReportDetailPage } from './pages/ReportDetailPage'
+import { ReportsPage } from './pages/ReportsPage'
+import { ReportTemplatesPage } from './pages/ReportTemplatesPage'
 import { StaffPage } from './pages/StaffPage'
 import { VersionsPage } from './pages/VersionsPage'
 import './App.css'
@@ -96,6 +99,9 @@ function App() {
         <Route path="/versions" element={<VersionsPage />} />
         <Route path="/baskets" element={<BasketsPage />} />
         <Route path="/patch-execution" element={<PatchExecutionPage />} />
+        <Route path="/reports" element={<ReportsPage />} />
+        <Route path="/reports/:id" element={<ReportDetailPage />} />
+        <Route path="/report-templates" element={<ReportTemplatesPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/staff" element={<StaffPage />} />
         <Route path="/settings" element={<PlaceholderPage title="Settings" />} />

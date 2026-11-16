@@ -1,6 +1,11 @@
 from django.urls import path
+from rest_framework.routers import SimpleRouter
 
 from . import views
+from .documents import DocumentViewSet
+
+router = SimpleRouter(trailing_slash=False)
+router.register(r"documents", DocumentViewSet, basename="portal-documents")
 
 urlpatterns = [
     path("auth/login", views.login, name="portal-login"),
@@ -11,4 +16,5 @@ urlpatterns = [
     path("auth/logout", views.logout, name="portal-logout"),
     path("me", views.me, name="portal-me"),
     path("home", views.home, name="portal-home"),
+    *router.urls,
 ]

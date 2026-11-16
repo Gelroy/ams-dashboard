@@ -314,3 +314,92 @@ def test_api_task_role_may_only_administer_the_portal_pool(dev_template):
     # Scoped to one pool's ARN (a GetAtt on the portal pool), never "*".
     assert stmt["Resource"] != "*"
     assert "PortalUserPool" in str(stmt["Resource"])
+
+
+# ── reports bucket and customer email ──
+
+
+def test_reports_bucket_is_private_encrypted_and_tls_only(dev_template):
+    dev_template.resource_count_is("AWS::S3::Bucket", 1)
+    dev_template.has_resource_properties(
+        "AWS::S3::Bucket",
+        {
+            "PublicAccessBlockConfiguration": {
+                "BlockPublicAcls": True,
+                "BlockPublicPolicy": True,
+                "IgnorePublicAcls": True,
+                "RestrictPublicBuckets": True,
+            },
+            "BucketEncryption": assertions.Match.any_value(),
+            "VersioningConfiguration": {"Status": "Enabled"},
+            "OwnershipControls": {"Rules": [{"ObjectOwnership": "BucketOwnerEnforced"}]},
+        },
+    )
+    policy = next(iter(dev_template.find_resources("AWS::S3::BucketPolicy").values()))
+    deny = [s for s in policy["Properties"]["PolicyDocument"]["Statement"] if s["Effect"] == "Deny"]
+    assert deny and deny[0]["Condition"] == {"Bool": {"aws:SecureTransport": "false"}}
+
+
+def _statements(template, needle):
+    return [
+        s
+        for p in template.find_resources("AWS::IAM::Policy").values()
+        for s in p["Properties"]["PolicyDocument"]["Statement"]
+        if any(needle in a for a in ([s["Action"]] if isinstance(s["Action"], str) else s["Action"]))
+    ]
+
+
+def test_api_may_write_and_read_reports_but_not_delete_or_list_buckets(dev_template):
+    actions = sorted(
+        a
+        for s in _statements(dev_template, "s3:")
+        for a in ([s["Action"]] if isinstance(s["Action"], str) else s["Action"])
+    )
+    assert "s3:PutObject" in actions and "s3:GetObject*" in actions
+    assert not any(a.startswith("s3:Delete") or a in ("s3:*", "s3:ListAllMyBuckets") for a in actions)
+    for s in _statements(dev_template, "s3:"):
+        assert "ReportsBucket" in str(s["Resource"])
+
+
+def test_api_containers_get_report_settings_with_email_off_by_default(dev_template):
+    dev_template.has_resource_properties(
+        "AWS::ECS::TaskDefinition",
+        {
+            "ContainerDefinitions": assertions.Match.array_with(
+                [
+                    assertions.Match.object_like(
+                        {
+                            "Environment": assertions.Match.array_with(
+                                [
+                                    {"Name": "PORTAL_EMAIL_MODE", "Value": "log"},
+                                    {"Name": "PORTAL_EMAIL_FROM", "Value": ""},
+                                ]
+                            )
+                        }
+                    )
+                ]
+            )
+        },
+    )
+    assert "REPORTS_BUCKET" in str(dev_template.find_resources("AWS::ECS::TaskDefinition"))
+    assert _statements(dev_template, "ses:") == []
+
+
+def test_email_sender_turns_on_ses_limited_to_that_address():
+    template = synth({**DOMAIN_CONTEXT, "portal_email_from": "reports@ams.example.com"})
+    (stmt,) = _statements(template, "ses:")
+    assert stmt["Action"] == "ses:SendEmail"
+    assert stmt["Condition"] == {"StringEquals": {"ses:FromAddress": "reports@ams.example.com"}}
+    assert '"PORTAL_EMAIL_MODE", "Value": "ses"' in __import__("json").dumps(
+        template.find_resources("AWS::ECS::TaskDefinition")
+    )
+
+
+def test_no_reports_bucket_without_the_portal(prod_template):
+    prod_template.resource_count_is("AWS::S3::Bucket", 0)
+    assert "REPORTS_BUCKET" not in str(prod_template.find_resources("AWS::ECS::TaskDefinition"))
+
+
+def test_email_sender_requires_the_portal():
+    with pytest.raises(ValueError, match="portal_email_from"):
+        synth({"create_vpc": "true", "portal_email_from": "reports@ams.example.com"})
