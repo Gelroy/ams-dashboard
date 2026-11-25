@@ -19,11 +19,11 @@ from django.utils import timezone
 
 from customers.models import Organization
 
-from . import notifications, pdf, storage, templating
+from . import ai, notifications, pdf, storage, templating
 from .context import build_context, period_label
+from .defaults import TICKET_SUMMARY_PLACEHOLDER
 from .markup import todo_marks
 from .models import Report, ReportStatus, ReportTemplate
-from .tickets import summarize_tickets
 
 _PERIOD = re.compile(r"^(\d{4})-(\d{2})$")
 
@@ -119,6 +119,20 @@ def issues(report: Report) -> list[dict]:
                 "when this draft was generated.",
             }
         )
+    written = (report.ai_summary or {}).get("text")
+    if (
+        written
+        and not report.is_approved
+        and any(written in (s.get("body") or "") for s in report.sections)
+    ):
+        out.append(
+            {
+                "level": "warning",
+                "section": "Support Tickets",
+                "message": "The ticket summary was drafted by AI and has not been edited. "
+                "Read it against the ticket lists before approving.",
+            }
+        )
     if not report.is_approved and not notifications.recipients(report):
         out.append(
             {
@@ -131,11 +145,51 @@ def issues(report: Report) -> list[dict]:
     return out
 
 
-def _fill(report: Report, template: ReportTemplate, org: Organization, period: date) -> None:
+def _quiet_month(activity: dict) -> bool:
+    return not (activity.get("opened") or activity.get("resolved") or activity.get("openAtEnd"))
+
+
+def _ticket_summary(
+    context: dict, *, requested_by: str, interactive: bool = False
+) -> tuple[str, dict]:
+    """(summary text, ai_summary record) for a context's ticket activity.
+    A month with no tickets gets a fixed sentence and never calls the AI.
+    Raises ReportError when there is nothing to summarise or the AI fails."""
+    activity = (context.get("tickets") or {}).get("month") or {}
+    period = (context.get("report") or {}).get("period") or ""
+    if not activity.get("available"):
+        raise ReportError(
+            "This month's tickets have not been synced, so there is nothing to summarise.", 409
+        )
+    if _quiet_month(activity):
+        return f"No support tickets were opened, resolved or outstanding during {period}.", {}
+    try:
+        result = ai.summarize(activity, period=period, interactive=interactive)
+    except ai.AiError as e:
+        raise ReportError(e.message, 502 if ai.enabled() else 409) from e
+    return result["text"], {
+        "text": result["text"],
+        "model": result["model"],
+        "generated_at": timezone.now().isoformat(),
+        "requested_by": requested_by,
+    }
+
+
+def _fill(
+    report: Report, template: ReportTemplate, org: Organization, period: date, *, ai_summary=False
+) -> None:
     now = timezone.now()
-    context = build_context(
-        org, period, generated_at=now, ticket_summary=summarize_tickets(org, period)
-    )
+    context = build_context(org, period, generated_at=now)
+    report.ai_summary = {}
+    if ai_summary and ai.enabled():
+        # Unattended generation: a failure here must not cost the draft. The
+        # "to be written" marker simply stays for staff.
+        try:
+            text, record = _ticket_summary(context, requested_by="generate_reports")
+            context["tickets"]["summary"] = text
+            report.ai_summary = record
+        except ReportError:
+            pass
     report.template = template
     report.template_name = template.name
     report.title = template.report_title
@@ -151,13 +205,17 @@ def generate(
     *,
     template: ReportTemplate | None = None,
     actor_email: str = "",
+    ai_summary: bool = False,
 ) -> Report:
+    """``ai_summary`` asks the AI for the ticket summary while generating.
+    Only the scheduled command does that: it can wait, a web request
+    generating many drafts cannot. Staff use write_ai_summary() instead."""
     if Report.objects.filter(organization=org, period=period).exists():
         raise ReportError(
             f"{org.display_name} already has a report for {period_label(period)}.", 409
         )
     report = Report(organization=org, period=period, created_by_email=actor_email)
-    _fill(report, template or default_template(), org, period)
+    _fill(report, template or default_template(), org, period, ai_summary=ai_summary)
     report.save()
     return report
 
@@ -189,6 +247,56 @@ def update_draft(report: Report, *, title: str | None = None, sections=None) -> 
     if sections is not None:
         report.sections = clean_sections(sections)
     report.save()
+    return report
+
+
+def _summary_slot(report: Report) -> str | None:
+    """The text the AI summary would replace: the "to be written" marker,
+    or an earlier AI summary nobody has edited. None if neither is there."""
+    bodies = [s.get("body") or "" for s in report.sections]
+    if any(TICKET_SUMMARY_PLACEHOLDER in b for b in bodies):
+        return TICKET_SUMMARY_PLACEHOLDER
+    previous = (report.ai_summary or {}).get("text")
+    if previous and any(previous in b for b in bodies):
+        return previous
+    return None
+
+
+def can_write_ai_summary(report: Report) -> bool:
+    return (
+        ai.enabled()
+        and report.status == ReportStatus.DRAFT
+        and bool(((report.context.get("tickets") or {}).get("month") or {}).get("available"))
+        and _summary_slot(report) is not None
+    )
+
+
+def write_ai_summary(report: Report, *, actor_email: str = "") -> Report:
+    """Have the AI draft the ticket summary of a draft report, in place of
+    the "to be written" marker (or of its own earlier, unedited attempt).
+    Text staff have written or edited is never overwritten."""
+    _require_draft(report)
+    if not ai.enabled():
+        raise ReportError("AI summaries are not set up in this environment.", 409)
+    if _summary_slot(report) is None:
+        raise ReportError(
+            "The ticket summary has already been written or edited. Regenerate the draft to "
+            "start again, or edit the text by hand.",
+            409,
+        )
+    # The slow call happens outside any transaction or row lock.
+    text, record = _ticket_summary(report.context, requested_by=actor_email, interactive=True)
+    with transaction.atomic():
+        report = Report.objects.select_for_update().get(pk=report.pk)
+        _require_draft(report)
+        slot = _summary_slot(report)
+        if slot is None:
+            raise ReportError("The draft changed while the summary was being written.", 409)
+        report.sections = [
+            {**s, "body": (s.get("body") or "").replace(slot, text)} for s in report.sections
+        ]
+        report.ai_summary = record
+        report.save()
     return report
 
 

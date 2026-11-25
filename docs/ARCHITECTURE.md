@@ -796,6 +796,7 @@ A single class that wires up the entire application. Major sections, in order:
 | `portal_staff_email_domains` | csv | `imt.ca` | Domains that may never be invited as customers |
 | `portal_email_from` | email | unset | Sender for customer emails. Set = send via SES from this address (must be a verified identity); unset = recipients are only recorded. With `portal_enabled` the stack also creates the private reports bucket. See `docs/CUSTOMER_PORTAL.md` §11 |
 | `reports_schedule_day` | 1-28 | unset | Day of the month a scheduled task creates last month's draft reports (09:00 UTC). Drafts only: it never approves or emails. Needs `portal_enabled`. See `docs/CUSTOMER_PORTAL.md` §11 |
+| `reports_ai_summary` | bool | `false` | Adds the `AnthropicApiKey` secret (placeholder `unset`) and passes it to the API service and the monthly draft task, so reports can ask Claude to draft the ticket summary. Off until the real key is stored. Needs `portal_enabled`. See `docs/CUSTOMER_PORTAL.md` §11 |
 
 ---
 

@@ -457,6 +457,25 @@ def test_monthly_draft_schedule_runs_generate_reports_once_a_month():
     assert "cognito-idp:" not in str(scheduled)
 
 
+def test_monthly_drafts_fetch_tickets_only_where_jira_is_in_use():
+    template = synth(
+        {**DOMAIN_CONTEXT, "reports_schedule_day": "2", "jira_sync_enabled": "true"}
+    )
+    template.has_resource_properties(
+        "AWS::ECS::TaskDefinition",
+        {
+            "ContainerDefinitions": [
+                assertions.Match.object_like(
+                    {"Command": ["python", "manage.py", "generate_reports", "--sync-tickets"]}
+                )
+            ]
+        },
+    )
+    # The synthetic environment (JIRA sync off) must never be told to call JIRA.
+    synthetic = synth({**DOMAIN_CONTEXT, "reports_schedule_day": "2"})
+    assert "--sync-tickets" not in str(synthetic.find_resources("AWS::ECS::TaskDefinition"))
+
+
 @pytest.mark.parametrize("day", ["0", "29", "first", "-1"])
 def test_monthly_draft_schedule_rejects_days_that_some_months_lack(day):
     with pytest.raises(ValueError, match="reports_schedule_day"):
@@ -466,3 +485,40 @@ def test_monthly_draft_schedule_rejects_days_that_some_months_lack(day):
 def test_monthly_draft_schedule_requires_the_portal():
     with pytest.raises(ValueError, match="reports_schedule_day"):
         synth({"create_vpc": "true", "reports_schedule_day": "2"})
+
+
+# ── AI-drafted ticket summaries ──────────────────────────────────────────
+
+def _containers_with_secret(template, name):
+    return [
+        c["Name"]
+        for t in template.find_resources("AWS::ECS::TaskDefinition").values()
+        for c in t["Properties"]["ContainerDefinitions"]
+        if any(s["Name"] == name for s in c.get("Secrets", []))
+    ]
+
+
+def test_no_anthropic_secret_unless_ai_summaries_are_on(dev_template):
+    assert "ANTHROPIC_API_KEY" not in str(dev_template.find_resources("AWS::ECS::TaskDefinition"))
+    assert "AnthropicApiKey" not in str(dev_template.find_resources("AWS::SecretsManager::Secret"))
+
+
+def test_ai_summaries_add_a_placeholder_secret_for_the_api_and_the_monthly_task_only():
+    template = synth(
+        {**DOMAIN_CONTEXT, "reports_ai_summary": "true", "reports_schedule_day": "2"}
+    )
+    secrets = template.find_resources("AWS::SecretsManager::Secret")
+    (anthropic_secret,) = [v for k, v in secrets.items() if k.startswith("AnthropicApiKey")]
+    # A placeholder, never a real key: the key is stored by hand afterwards.
+    assert anthropic_secret["Properties"]["SecretString"] == "unset"
+    assert sorted(_containers_with_secret(template, "ANTHROPIC_API_KEY")) == [
+        "ReportsGenerateDrafts",
+        "web",
+    ]
+    template.has_output("AnthropicSecretArn", {})
+
+
+def test_ai_summaries_require_the_portal():
+    with pytest.raises(ValueError, match="reports_ai_summary"):
+        synth({"create_vpc": "true", "reports_ai_summary": "true"})
+

@@ -27,5 +27,6 @@ os.environ["PORTAL_HOST"] = ""
 os.environ["PORTAL_STAFF_EMAIL_DOMAINS"] = "imt.ca"
 os.environ["REPORTS_BUCKET"] = ""
 os.environ["PORTAL_EMAIL_MODE"] = "log"
+os.environ["ANTHROPIC_API_KEY"] = ""  # tests never call the AI service
 
 from .settings import *  # noqa: E402, F401, F403

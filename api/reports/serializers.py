@@ -128,11 +128,24 @@ class ReportDetailSerializer(ReportListSerializer):
         fields = [
             *ReportListSerializer.Meta.fields,
             "template", "sections", "issues", "recipients", "notifications", "pdf_size",
-            "pdf_sha256",
+            "pdf_sha256", "ai_summary", "can_write_ai_summary",
         ]
+
+    ai_summary = serializers.SerializerMethodField()
+    can_write_ai_summary = serializers.SerializerMethodField()
 
     def get_issues(self, obj):
         return services.issues(obj)
+
+    def get_ai_summary(self, obj):
+        """Who drafted the summary and when — not the text, which is in the sections."""
+        record = obj.ai_summary or {}
+        if not record:
+            return None
+        return {k: record.get(k) for k in ("model", "generated_at", "requested_by")}
+
+    def get_can_write_ai_summary(self, obj):
+        return services.can_write_ai_summary(obj)
 
     def get_recipients(self, obj):
         from .notifications import recipients

@@ -99,6 +99,7 @@ export function ReportsPage() {
             <tr>
               <th>Customer</th>
               <th style={{ width: 150 }}>Monitoring data</th>
+              <th style={{ width: 120 }}>Tickets</th>
               <th style={{ width: 150 }}>Email recipients</th>
               <th style={{ width: 130 }}>Report</th>
               <th style={{ width: 150 }} />
@@ -107,14 +108,14 @@ export function ReportsPage() {
           <tbody>
             {!rows && !error && (
               <tr>
-                <td colSpan={5} className="state-cell">
+                <td colSpan={6} className="state-cell">
                   Loading…
                 </td>
               </tr>
             )}
             {rows?.length === 0 && (
               <tr>
-                <td colSpan={5} className="state-cell">
+                <td colSpan={6} className="state-cell">
                   No customers have an AMS level yet.
                 </td>
               </tr>
@@ -200,6 +201,17 @@ function ReportRow({
           hidden
           onChange={(e) => void onFile(e.target.files?.[0])}
         />
+      </td>
+      <td>
+        {row.tickets_synced ? (
+          <span className="badge badge-portal-active" title="Ticket activity for this month is in">
+            {row.tickets_count} synced
+          </span>
+        ) : (
+          <span className="badge" title="The report will show open ticket counts only">
+            Not synced
+          </span>
+        )}
       </td>
       <td>
         {row.report_recipients > 0 ? (

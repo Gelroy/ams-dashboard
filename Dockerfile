@@ -79,10 +79,14 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -fsS http://localhost:8000/health || exit 1
 
+# --timeout 90: one request (the AI-drafted ticket summary) waits on an
+# outside service for up to 45 seconds; gunicorn's default of 30 would kill
+# the worker mid-call. The load balancer still cuts every request at 60.
 # Default command: run the API server. Override CMD to run management
 # commands (e.g. migrations, the JIRA sync workers).
 CMD ["gunicorn", "ams_dashboard.wsgi:application", \
      "--bind", "0.0.0.0:8000", \
      "--workers", "2", \
+     "--timeout", "90", \
      "--access-logfile", "-", \
      "--error-logfile", "-"]

@@ -116,9 +116,21 @@ Optional context:
                               task creates last month's draft reports, at
                               09:00 UTC. It only creates drafts that do not
                               exist yet and never approves or emails
-                              anything. Unset (default): no schedule —
+                              anything. With jira_sync_enabled it first
+                              fetches the month's tickets from JIRA.
+                              Unset (default): no schedule —
                               drafts are generated from the Reports screen.
                               Needs portal_enabled.
+  - reports_ai_summary      : 'true' lets the API and the monthly draft
+                              task ask Claude, through the Anthropic API,
+                              to draft the ticket summary of a report.
+                              Creates a Secrets Manager secret for the
+                              API key, holding the placeholder "unset"
+                              until someone puts the real key in; while it
+                              says "unset" the feature stays off. Ticket
+                              figures and titles are then sent to
+                              api.anthropic.com, outside AWS. Default
+                              false. Needs portal_enabled.
 
 With portal_enabled the stack also creates the reports bucket: private,
 encrypted, TLS-only, versioned. Approved report PDFs are stored there and
@@ -248,6 +260,11 @@ class AmsDashboardStack(cdk.Stack):
         portal_email_from = str(self.node.try_get_context("portal_email_from") or "").strip()
         if portal_email_from and not portal_enabled:
             raise ValueError("portal_email_from needs portal_enabled=true.")
+        reports_ai_summary = (
+            str(self.node.try_get_context("reports_ai_summary") or "").lower() == "true"
+        )
+        if reports_ai_summary and not portal_enabled:
+            raise ValueError("reports_ai_summary needs portal_enabled=true.")
         reports_schedule_day_raw = str(
             self.node.try_get_context("reports_schedule_day") or ""
         ).strip()
@@ -663,6 +680,25 @@ class AmsDashboardStack(cdk.Stack):
             common_env["CSRF_TRUSTED_ORIGINS"] = (
                 f"https://{domain_name},https://*.{domain_name}"
             )
+        # Anthropic API key for AI-drafted ticket summaries. Created with a
+        # placeholder; an admin puts the real key in afterwards, so the key
+        # is never in the template, the repo or a deploy log. Only the API
+        # service and the monthly draft task receive it.
+        ai_secrets = {}
+        anthropic_secret = None
+        if reports_ai_summary:
+            anthropic_secret = secretsmanager.Secret(
+                self,
+                "AnthropicApiKey",
+                description=(
+                    "Anthropic API key for AI-drafted ticket summaries in monthly "
+                    'reports. Replace the placeholder "unset" with the key, then '
+                    "restart the API service."
+                ),
+                secret_string_value=cdk.SecretValue.unsafe_plain_text("unset"),
+            )
+            ai_secrets = {"ANTHROPIC_API_KEY": ecs.Secret.from_secrets_manager(anthropic_secret)}
+
         common_secrets = {
             "SECRET_KEY": ecs.Secret.from_secrets_manager(django_secret),
             "DB_HOST": ecs.Secret.from_secrets_manager(db_cluster.secret, "host"),
@@ -724,7 +760,7 @@ class AmsDashboardStack(cdk.Stack):
                 image=image,
                 container_port=8000,
                 environment=common_env,
-                secrets=common_secrets,
+                secrets={**common_secrets, **ai_secrets},
                 log_driver=ecs.LogDriver.aws_logs(
                     stream_prefix="api", log_group=log_group
                 ),
@@ -875,6 +911,7 @@ class AmsDashboardStack(cdk.Stack):
             mgmt_command: str,
             schedule: appscaling.Schedule,
             task_log_group: logs.ILogGroup = sync_log_group,
+            extra_secrets: dict | None = None,
         ):
             task_def = ecs.FargateTaskDefinition(
                 self, f"{name}Task", cpu=256, memory_limit_mib=512
@@ -885,9 +922,9 @@ class AmsDashboardStack(cdk.Stack):
             task_def.add_container(
                 name,
                 image=image,
-                command=["python", "manage.py", mgmt_command],
+                command=["python", "manage.py", *mgmt_command.split()],
                 environment=common_env,
-                secrets=common_secrets,
+                secrets={**common_secrets, **(extra_secrets or {})},
                 logging=ecs.LogDriver.aws_logs(
                     stream_prefix=name, log_group=task_log_group
                 ),
@@ -947,14 +984,18 @@ class AmsDashboardStack(cdk.Stack):
         # run and the schedule never collide; approving and emailing stay
         # with staff. Needs no bucket access: PDFs are only stored on
         # approval, by the API.
+        # Where JIRA is in use the task first fetches the month's tickets for
+        # the Support Tickets section; a synthetic environment (JIRA sync
+        # off) never calls JIRA and takes its tickets from the seed.
         if reports_schedule_day is not None:
             _scheduled_sync(
                 "ReportsGenerateDrafts",
-                "generate_reports",
+                "generate_reports --sync-tickets" if jira_sync_enabled else "generate_reports",
                 appscaling.Schedule.cron(
                     minute="0", hour="9", day=str(reports_schedule_day), month="*"
                 ),
                 task_log_group=log_group,
+                extra_secrets=ai_secrets,
             )
 
         # ── Outputs ────────────────────────────────────────────────────
@@ -973,5 +1014,7 @@ class AmsDashboardStack(cdk.Stack):
             cdk.CfnOutput(self, "PortalUserPoolId", value=portal_pool.user_pool_id)
             cdk.CfnOutput(self, "PortalAppClientId", value=portal_client.user_pool_client_id)
             cdk.CfnOutput(self, "ReportsBucketName", value=reports_bucket.bucket_name)
+            if anthropic_secret is not None:
+                cdk.CfnOutput(self, "AnthropicSecretArn", value=anthropic_secret.secret_arn)
             if portal_host:
                 cdk.CfnOutput(self, "PortalUrl", value=f"https://{portal_host}")

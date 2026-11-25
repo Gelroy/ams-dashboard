@@ -10,6 +10,7 @@ import {
   notifyReport,
   openPdfWhenReady,
   regenerateReport,
+  writeAiSummary,
   saveReport,
   type Report,
   type ReportSection,
@@ -120,6 +121,7 @@ export function ReportDetailPage() {
           {report.period_label} · template “{report.template_name}” · generated{' '}
           {when(report.generated_at)}
           {report.created_by_email ? ` by ${report.created_by_email}` : ''}
+          {report.ai_summary ? ` · ticket summary drafted by AI (${report.ai_summary.model})` : ''}
           {!isDraft && ` · approved ${when(report.approved_at)} by ${report.approved_by_email || 'unknown'}`}
         </span>
       </div>
@@ -180,6 +182,25 @@ export function ReportDetailPage() {
             >
               {busy === 'approve' ? 'Approving…' : 'Approve and publish'}
             </button>
+            {report.can_write_ai_summary && (
+              <button
+                className="btn"
+                disabled={busy !== null || dirty}
+                title={
+                  dirty
+                    ? 'Save your changes first'
+                    : "Sends this month's ticket figures and titles for this customer to the AI service and puts its summary in the draft"
+                }
+                onClick={() =>
+                  void run('ai', async () => {
+                    adopt(await writeAiSummary(report.id))
+                    return 'Ticket summary drafted by AI. Read it against the ticket lists before approving.'
+                  })
+                }
+              >
+                {busy === 'ai' ? 'Writing summary…' : 'Write ticket summary with AI'}
+              </button>
+            )}
             <button
               className="btn-link"
               disabled={busy !== null}

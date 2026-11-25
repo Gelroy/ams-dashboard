@@ -34,6 +34,10 @@ env = environ.Env(
     # nothing; "ses" sends through Amazon SES from PORTAL_EMAIL_FROM.
     PORTAL_EMAIL_MODE=(str, "log"),
     PORTAL_EMAIL_FROM=(str, ""),
+    # Anthropic API key for AI-drafted ticket summaries in monthly reports.
+    # Empty (default) = the feature is off and nothing is sent anywhere.
+    ANTHROPIC_API_KEY=(str, ""),
+    REPORTS_AI_MODEL=(str, "claude-opus-5-5"),
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
@@ -62,6 +66,11 @@ PORTAL_MFA_ISSUER = env("PORTAL_MFA_ISSUER")
 REPORTS_BUCKET = env("REPORTS_BUCKET")
 REPORTS_LOCAL_DIR = BASE_DIR / "var" / "reports"
 PORTAL_EMAIL_FROM = env("PORTAL_EMAIL_FROM")
+# "unset" is the placeholder the stack writes into a new secret.
+ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY").strip()
+if ANTHROPIC_API_KEY.lower() == "unset":
+    ANTHROPIC_API_KEY = ""
+REPORTS_AI_MODEL = env("REPORTS_AI_MODEL").strip() or "claude-opus-5-5"
 # Never send unless both the mode and a sender are configured.
 PORTAL_EMAIL_MODE = "ses" if env("PORTAL_EMAIL_MODE") == "ses" and PORTAL_EMAIL_FROM else "log"
 

@@ -2,13 +2,14 @@
 
 Run after ``seed_synthetic`` in a synthetic-only environment. It adds a
 small fictional software catalog, what is installed on each seeded
-server, some patch history, one planned patch per customer, and three
-months of monitoring metrics in the JSON shape the default report
-template expects — so a generated report has every section filled.
+server, some patch history, one planned patch per customer, three months
+of monitoring metrics in the JSON shape the default report template
+expects, and three months of invented support tickets — so a generated
+report has every section filled.
 
 Same safety rule as seed_synthetic: refuses to run if the database holds
 any organization that is not synthetic. Create-only and idempotent;
-``--reset`` rewrites the metrics deliveries.
+``--reset`` rewrites the metrics deliveries and the tickets.
 
 One customer (the last) deliberately gets no metrics for the most recent
 month, to show what a report looks like when monitoring data is late.
@@ -17,7 +18,7 @@ month, to show what a report looks like when monitoring data is late.
 from __future__ import annotations
 
 import random
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
@@ -25,8 +26,8 @@ from django.db import transaction
 from baskets.models import ServerInstalledSoftware
 from customers.models import Environment, Organization, Server
 from patching.models import PatchExecution, PatchExecutionStatus, PatchHistory
-from reports import services
-from reports.models import MetricsDelivery
+from reports import services, tickets
+from reports.models import MetricsDelivery, TicketOrigin, TicketSync
 from software.models import LifecycleStatus, Software, SoftwareRelease
 
 SYNTHETIC_PREFIX = "synthetic-"
@@ -127,11 +128,68 @@ def metrics_for(org: Organization, period: date, servers: list[Server]) -> dict:
     }
 
 
+# (summary with {server}, type, raised by monitoring?)
+TICKET_KINDS = [
+    ("High CPU utilisation on {server}", "Incident", True),
+    ("Free disk space below 15% on {server}", "Incident", True),
+    ("Scheduled job overran on {server}", "Incident", True),
+    ("Users report slow response in the afternoon", "Incident", False),
+    ("Unable to print discharge summaries", "Incident", False),
+    ("Request: new user accounts for the admissions team", "Service request", False),
+    ("Request: refresh TEST from PROD", "Service request", False),
+    ("Question about the upcoming patch window", "Service request", False),
+    ("Interface messages queued on {server}", "Incident", True),
+    ("Request: extend report retention to 24 months", "Change", False),
+]
+TICKET_PRIORITIES = ["High", "Medium", "Medium", "Medium", "Low", "Low"]
+#: Not "jira": these never came from a ticket system.
+TICKET_SOURCE = "synthetic"
+
+
+def tickets_for(org: Organization, period: date, servers: list[Server], latest: bool) -> list[dict]:
+    """A handful of invented tickets opened in ``period``. Repeatable: the
+    same customer and month always produce the same tickets."""
+    rng = random.Random(f"{org.jira_org_id}:{period:%Y-%m}:tickets")
+    names = [s.name for s in servers] or ["prod-01"]
+    month_start = datetime(period.year, period.month, 1, 8, 0, tzinfo=UTC)
+    now = datetime.now(UTC)
+    out = []
+    for i in range(rng.randint(4, 9)):
+        summary, issue_type, automated = rng.choice(TICKET_KINDS)
+        opened = month_start + timedelta(
+            days=rng.randrange(days_in(period)), hours=rng.randrange(9), minutes=rng.randrange(60)
+        )
+        roll = rng.random()
+        if roll < 0.75:
+            resolved = opened + timedelta(hours=rng.randint(2, 9 * 24))
+            if resolved > now:
+                resolved = None  # seeded early in the month: not resolved yet
+        elif latest:
+            resolved = None  # still open when the report is written
+        else:
+            resolved = opened + timedelta(days=rng.randint(12, 25))  # carried into next month
+        out.append(
+            {
+                "key": f"SYN-{org.jira_org_id[-3:]}-{period:%y%m}{i + 1:02d}",
+                "summary": summary.format(server=rng.choice(names)),
+                "issue_type": issue_type,
+                "priority": rng.choice(TICKET_PRIORITIES),
+                "status": "Resolved" if resolved else rng.choice(["In progress", "Waiting"]),
+                "origin": TicketOrigin.AUTOMATED if automated else TicketOrigin.MANUAL,
+                "opened_at": opened,
+                "resolved_at": resolved,
+            }
+        )
+    return out
+
+
 class Command(BaseCommand):
-    help = "Seed software, patching and monitoring data for the synthetic customers."
+    help = "Seed software, patching, monitoring and ticket data for the synthetic customers."
 
     def add_arguments(self, parser):
-        parser.add_argument("--reset", action="store_true", help="Rewrite metrics deliveries.")
+        parser.add_argument(
+            "--reset", action="store_true", help="Rewrite metrics deliveries and tickets."
+        )
         parser.add_argument(
             "--force", action="store_true", help="Run even if non-synthetic organizations exist."
         )
@@ -152,7 +210,14 @@ class Command(BaseCommand):
         if not orgs:
             raise CommandError("No synthetic customers found. Run seed_synthetic first.")
 
-        counts = {"software": 0, "installed": 0, "patches": 0, "planned": 0, "metrics": 0}
+        counts = {
+            "software": 0,
+            "installed": 0,
+            "patches": 0,
+            "planned": 0,
+            "metrics": 0,
+            "tickets": 0,
+        }
 
         catalog: list[tuple[Software, list[SoftwareRelease]]] = []
         for name, version, status, release_names in CATALOG:
@@ -245,6 +310,18 @@ class Command(BaseCommand):
                 )
                 execution.softwares.add(app, db)
                 counts["planned"] += 1
+
+            for period in periods:
+                seeded = TicketSync.objects.filter(
+                    organization=org, period=period, source=TICKET_SOURCE
+                ).exists()
+                if opts["reset"] or not seeded:
+                    counts["tickets"] += tickets.store_tickets(
+                        org,
+                        period,
+                        tickets_for(org, period, servers, latest=period == latest_period),
+                        source=TICKET_SOURCE,
+                    )
 
             for period in periods:
                 if index == len(orgs) - 1 and period == latest_period:

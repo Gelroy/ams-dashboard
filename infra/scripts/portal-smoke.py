@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import datetime
 import hashlib
 import hmac
 import json
@@ -380,6 +381,37 @@ def main() -> int:
         s.check("deleting the report removes it from the portal",
                 st == 204 and portal.raw(f"/api/portal/documents/{mine['id']}/download",
                                          token=cust_token)[0] == 404, f"{st}")
+
+        # ── ticket activity ───────────────────────────────────────────
+        # Read-only: the synthetic tickets come from seed_synthetic_reports.
+        print("Ticket activity")
+        today = datetime.date.today()
+        last_month = (today.replace(day=1) - datetime.timedelta(days=1)).strftime("%Y-%m")
+        st, overview = dash.call("GET", f"/api/reports/overview/?period={last_month}",
+                                 token=staff_token)
+        synced = [r for r in (overview or {}).get("rows", []) if r.get("tickets_synced")]
+        s.check("last month's tickets are in for the synthetic customers",
+                st == 200 and len(synced) >= 2, f"{st} {len(synced)} synced")
+        st, ref = dash.call("GET", "/api/report-templates/tags/", token=staff_token)
+        s.check("ticket tags are in the template reference",
+                st == 200 and any(t["tag"] == "tickets.month.opened" for t in ref["tags"]))
+        st, templates = dash.call("GET", "/api/report-templates/", token=staff_token)
+        default = next((t for t in templates or [] if t["is_default"]), None)
+        s.check("the default template prints the month's tickets",
+                bool(default) and "tickets.month.resolvedList" in json.dumps(default["sections"]))
+        # The AI summary. This 2020 report is approved and has no synced
+        # tickets, so asking is a 409 whether or not a key is configured:
+        # the smoke test never spends money.
+        st, detail = dash.call("GET", f"/api/reports/{theirs['id']}/", token=staff_token)
+        s.check("report detail says whether an AI summary can be written",
+                st == 200 and detail.get("can_write_ai_summary") is False
+                and "ai_summary" in detail, f"{st}")
+        st, _ = dash.call("POST", f"/api/reports/{theirs['id']}/ai-summary/", token=staff_token)
+        s.check("no AI call for an approved report", st == 409, f"{st}")
+        s.check("a customer token cannot ask for an AI summary",
+                dash.raw(f"/api/reports/{theirs['id']}/ai-summary/", token=cust_token)[0] == 401)
+        s.check("a customer token cannot read the ticket overview",
+                dash.raw(f"/api/reports/overview/?period={last_month}", token=cust_token)[0] == 401)
 
         # ── unattended metrics delivery ───────────────────────────────
         # A machine key may deliver metrics and do nothing else. Uses a

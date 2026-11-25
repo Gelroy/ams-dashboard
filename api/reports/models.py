@@ -3,6 +3,8 @@
   ReportTemplate   editable section text with {tags}; one is the default
   MetricsDelivery  one month of monitoring metrics (JSON) for a customer
   MetricsKey       machine credential that may deliver metrics, nothing else
+  TicketRecord     a customer's support ticket, synced from the ticket system
+  TicketSync       which months of tickets have been fetched per customer
   Report           a customer's report for a month: DRAFT → APPROVED
   ReportNotification  who was told about an approved report
 
@@ -101,6 +103,69 @@ class MetricsKey(models.Model):
         return f"{self.name} ({self.prefix}…)"
 
 
+class TicketOrigin(models.TextChoices):
+    MANUAL = "manual", "Raised by a person"
+    AUTOMATED = "automated", "Raised by monitoring"
+
+
+class TicketRecord(models.Model):
+    """One support ticket of one customer, as last seen in the ticket
+    system. Reports work out a month's activity from the opened and
+    resolved times, so one row serves every month the ticket was active."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="ticket_records"
+    )
+    source = models.CharField(max_length=32, default="jira")
+    key = models.CharField(max_length=64)
+    summary = models.TextField(blank=True, default="")
+    issue_type = models.CharField(max_length=64, blank=True, default="")
+    priority = models.CharField(max_length=32, blank=True, default="")
+    status = models.CharField(max_length=64, blank=True, default="")
+    origin = models.CharField(
+        max_length=16, choices=TicketOrigin.choices, default=TicketOrigin.MANUAL
+    )
+    opened_at = models.DateTimeField()
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "report_ticket_records"
+        ordering = ["opened_at", "key"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "source", "key"],
+                name="report_ticket_org_source_key_unique",
+            ),
+        ]
+        indexes = [models.Index(fields=["organization", "opened_at"])]
+
+
+class TicketSync(models.Model):
+    """Records that a customer's tickets for a month were fetched, so a
+    month with no tickets can be told apart from a month never synced."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="ticket_syncs"
+    )
+    #: First day of the month.
+    period = models.DateField()
+    source = models.CharField(max_length=32, default="jira")
+    ticket_count = models.IntegerField(default=0)
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "report_ticket_syncs"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "period", "source"],
+                name="report_ticket_sync_org_period_source_unique",
+            ),
+        ]
+
+
 class ReportStatus(models.TextChoices):
     DRAFT = "draft", "Draft"
     APPROVED = "approved", "Approved"
@@ -126,6 +191,9 @@ class Report(SoftDeleteModel):
     sections = models.JSONField(default=list)
     #: The data the tags were filled from, kept for audit.
     context = models.JSONField(default=dict)
+    #: {"text", "model", "generated_at", "requested_by"} when the ticket
+    #: summary was drafted by AI; empty otherwise.
+    ai_summary = models.JSONField(default=dict, blank=True)
     generated_at = models.DateTimeField()
     created_by_email = models.TextField(blank=True, default="")
     approved_at = models.DateTimeField(null=True, blank=True)

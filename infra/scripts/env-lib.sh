@@ -76,6 +76,9 @@ build_context_flags() {
     if [[ -n "${PORTAL_EMAIL_FROM:-}" ]]; then
       CONTEXT_FLAGS+=(-c "portal_email_from=$PORTAL_EMAIL_FROM")
     fi
+    if [[ "${REPORTS_AI_SUMMARY:-false}" == "true" ]]; then
+      CONTEXT_FLAGS+=(-c reports_ai_summary=true)
+    fi
     if [[ -n "${REPORTS_SCHEDULE_DAY:-}" ]]; then
       CONTEXT_FLAGS+=(-c "reports_schedule_day=$REPORTS_SCHEDULE_DAY")
     fi

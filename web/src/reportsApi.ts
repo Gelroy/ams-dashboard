@@ -58,6 +58,8 @@ export interface Report {
   issues: ReportIssue[]
   recipients: string[]
   notifications: ReportNotification[]
+  ai_summary: { model: string; generated_at: string; requested_by: string } | null
+  can_write_ai_summary: boolean
   pdf_size: number | null
 }
 
@@ -66,6 +68,8 @@ export interface OverviewRow {
   organization_name: string
   ams_level: string | null
   metrics_received: boolean
+  tickets_synced: boolean
+  tickets_count: number | null
   portal_users: number
   report_recipients: number
   report: {
@@ -110,6 +114,10 @@ export const saveReport = (id: string, patch: { title: string; sections: ReportS
 
 export const regenerateReport = (id: string) =>
   request<Report>(`/reports/${id}/regenerate/`, json('POST', {}))
+
+/** Can take half a minute: the AI service is called while the request waits. */
+export const writeAiSummary = (id: string) =>
+  request<Report>(`/reports/${id}/ai-summary/`, json('POST', {}))
 
 export const approveReport = (id: string) =>
   request<Report>(`/reports/${id}/approve/`, json('POST', {}))

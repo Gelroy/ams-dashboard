@@ -16,6 +16,7 @@ from software.models import LifecycleStatus
 
 from .defaults import TICKET_SUMMARY_PLACEHOLDER
 from .models import MetricsDelivery
+from .tickets import month_activity
 
 CERT_HORIZON_DAYS = 90
 
@@ -181,6 +182,7 @@ def build_context(
             "manual": org.manual_ticket_count,
             "automated": org.automated_ticket_count,
             "summary": ticket_summary or TICKET_SUMMARY_PLACEHOLDER,
+            "month": month_activity(org, period),
         },
         "software": {
             "installed": installed,

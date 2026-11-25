@@ -1,7 +1,20 @@
 from base64 import b64encode
+from datetime import datetime
 
 import httpx
 from django.conf import settings
+
+
+def _parse_jira_time(value):
+    """JIRA writes 2026-10-14T09:12:33.000+0000; return an aware datetime."""
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 class JiraClient:
@@ -147,6 +160,54 @@ class JiraClient:
             f"AND (assignee not in ({ids}) OR assignee IS EMPTY)"
         )
         return self._count_open_with_jql(jql_auto), self._count_open_with_jql(jql_manual)
+
+    def fetch_month_tickets(self, jira_org_id: str, start, end) -> list[dict]:
+        """Tickets of one organization that were active during [start, end):
+        opened before the end, and either still unresolved or resolved on or
+        after the start. Used by the monthly customer report.
+
+        ``start`` and ``end`` are dates. Returns plain dicts — key, summary,
+        issue_type, priority, status, assignee_id, opened_at, resolved_at —
+        with aware datetimes.
+        """
+        jql = (
+            f'organizations = {jira_org_id} AND created < "{end:%Y-%m-%d}" '
+            f'AND (resolution IS EMPTY OR resolved >= "{start:%Y-%m-%d}") '
+            "ORDER BY created ASC"
+        )
+        fields = ["summary", "issuetype", "priority", "status", "assignee", "created",
+                  "resolutiondate"]
+        out: list[dict] = []
+        next_page_token: str | None = None
+        for _ in range(50):  # safety cap: 50 * 100 = 5000 issues
+            body: dict = {"jql": jql, "fields": fields, "maxResults": 100}
+            if next_page_token:
+                body["nextPageToken"] = next_page_token
+            r = self._client.post(f"{self._base}/rest/api/3/search/jql", json=body)
+            r.raise_for_status()
+            data = r.json()
+            issues = data.get("issues") or []
+            for issue in issues:
+                f = issue.get("fields") or {}
+                opened = _parse_jira_time(f.get("created"))
+                if opened is None:
+                    continue
+                out.append(
+                    {
+                        "key": issue.get("key") or str(issue.get("id")),
+                        "summary": f.get("summary") or "",
+                        "issue_type": (f.get("issuetype") or {}).get("name") or "",
+                        "priority": (f.get("priority") or {}).get("name") or "",
+                        "status": (f.get("status") or {}).get("name") or "",
+                        "assignee_id": (f.get("assignee") or {}).get("accountId") or "",
+                        "opened_at": opened,
+                        "resolved_at": _parse_jira_time(f.get("resolutiondate")),
+                    }
+                )
+            next_page_token = data.get("nextPageToken")
+            if not next_page_token or not issues:
+                break
+        return out
 
     def fetch_open_ticket_count(self, jira_org_id: str) -> int:
         """Total open ticket count for one org. Kept for backwards compatibility

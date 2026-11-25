@@ -20,7 +20,14 @@ from portal.models import PortalAccount, PortalAccountStatus
 from . import ingest, notifications, pdf, services
 from .context import build_context, period_label
 from .defaults import TAG_REFERENCE
-from .models import MetricsDelivery, MetricsKey, Report, ReportStatus, ReportTemplate
+from .models import (
+    MetricsDelivery,
+    MetricsKey,
+    Report,
+    ReportStatus,
+    ReportTemplate,
+    TicketSync,
+)
 from .serializers import (
     MetricsDeliverySerializer,
     MetricsKeySerializer,
@@ -267,6 +274,15 @@ class ReportViewSet(
             return _error(e)
         return self._detail(report)
 
+    @action(detail=True, methods=["post"], url_path="ai-summary")
+    def ai_summary(self, request, pk=None):
+        """Have the AI draft the ticket summary of this draft."""
+        try:
+            report = services.write_ai_summary(self.get_object(), actor_email=_actor(request))
+        except services.ReportError as e:
+            return _error(e)
+        return self._detail(report)
+
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
         try:
@@ -309,6 +325,9 @@ class ReportViewSet(
         with_metrics = set(
             MetricsDelivery.objects.filter(period=period).values_list("organization_id", flat=True)
         )
+        with_tickets = dict(
+            TicketSync.objects.filter(period=period).values_list("organization_id", "ticket_count")
+        )
         portal_users: dict = {}
         notified: dict = {}
         accounts = PortalAccount.objects.filter(
@@ -326,6 +345,8 @@ class ReportViewSet(
                     "organization_name": org.display_name,
                     "ams_level": org.ams_level,
                     "metrics_received": org.id in with_metrics,
+                    "tickets_synced": org.id in with_tickets,
+                    "tickets_count": with_tickets.get(org.id),
                     "portal_users": portal_users.get(org.id, 0),
                     "report_recipients": notified.get(org.id, 0),
                     "report": (
