@@ -13,6 +13,7 @@ import { CriticalPage } from './pages/CriticalPage'
 import { CustomerDetailPage } from './pages/CustomerDetailPage'
 import { CustomersPage } from './pages/CustomersPage'
 import { LoginPage } from './pages/LoginPage'
+import { MetricsDeliveryPage } from './pages/MetricsDeliveryPage'
 import { NewPasswordPage } from './pages/NewPasswordPage'
 import { PatchExecutionPage } from './pages/PatchExecutionPage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
@@ -102,6 +103,7 @@ function App() {
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/reports/:id" element={<ReportDetailPage />} />
         <Route path="/report-templates" element={<ReportTemplatesPage />} />
+        <Route path="/metrics-delivery" element={<MetricsDeliveryPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/staff" element={<StaffPage />} />
         <Route path="/settings" element={<PlaceholderPage title="Settings" />} />

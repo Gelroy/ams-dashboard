@@ -176,6 +176,8 @@ def main() -> int:
     invited_user = None  # (org_id, user_id, original local_email)
     customer_sub = None
     report_ids: list[str] = []
+    metrics_key_id = None
+    metrics_delivery_ids: list[str] = []
 
     try:
         print(f"→ environment {args.env}: {dash.base} / {portal.base}")
@@ -379,6 +381,54 @@ def main() -> int:
                 st == 204 and portal.raw(f"/api/portal/documents/{mine['id']}/download",
                                          token=cust_token)[0] == 404, f"{st}")
 
+        # ── unattended metrics delivery ───────────────────────────────
+        # A machine key may deliver metrics and do nothing else. Uses a
+        # month far in the past; the delivery and the key are removed in
+        # Cleanup.
+        print("Unattended metrics delivery")
+        ingest = "/api/report-metrics/ingest"
+        one = {"customer": org["jira_org_id"], "period": "2020-02",
+               "metrics": {"availability": {"percent": 99.9}}}
+        st, made = dash.call("POST", "/api/report-metrics-keys/", token=staff_token,
+                             body={"name": f"smoke-key-{tag}"})
+        machine_key = (made or {}).get("key", "")
+        if not s.check("admin creates a delivery key, shown once",
+                       st == 201 and machine_key.startswith("amsm_"), f"{st}"):
+            return 1
+        metrics_key_id = made["id"]
+        st, listed = dash.call("GET", "/api/report-metrics-keys/", token=staff_token)
+        s.check("the key is never listed again",
+                st == 200 and machine_key not in json.dumps(listed))
+        st, out = dash.call("POST", ingest, token=machine_key, body=one)
+        s.check("the key delivers a month of metrics",
+                st == 200 and out["accepted"] == 1 and out["rejected"] == 0, f"{st} {out}")
+        st, stored = dash.call(
+            "GET", f"/api/report-metrics/?organization={org['id']}&period=2020-02",
+            token=staff_token)
+        metrics_delivery_ids.extend(d["id"] for d in stored or [])
+        s.check("the delivery is stored against that customer and key",
+                st == 200 and len(stored) == 1
+                and stored[0]["delivered_by"] == f"key:smoke-key-{tag}"
+                and stored[0]["payload"] == one["metrics"], f"{st} {stored}")
+        st, out = dash.call("POST", ingest, token=machine_key,
+                            body={**one, "customer": "no-such-customer"})
+        s.check("an unknown customer fails the request", st == 422, f"{st} {out}")
+        s.check("the key opens no staff API",
+                all(dash.call("GET", path, token=machine_key)[0] == 401
+                    for path in ("/api/reports/", "/api/report-metrics/",
+                                 "/api/report-metrics-keys/", "/api/organizations/")))
+        s.check("the key opens nothing on the portal",
+                portal.call("GET", "/api/portal/documents", token=machine_key)[0] == 401
+                and portal.call("POST", ingest, token=machine_key, body=one)[0] == 404)
+        s.check("delivery needs a key: none, staff and customer tokens are refused",
+                all(dash.call("POST", ingest, token=t, body=one)[0] == 401
+                    for t in (None, staff_token, cust_token)))
+        st, _ = dash.call("DELETE", f"/api/report-metrics-keys/{metrics_key_id}/",
+                          token=staff_token)
+        s.check("a revoked key stops working at once",
+                st == 204 and dash.call("POST", ingest, token=machine_key, body=one)[0] == 401,
+                f"{st}")
+
         # ── returning sign-in ─────────────────────────────────────────
         print("Returning sign-in")
         st, step = portal.call("POST", "/api/portal/auth/login",
@@ -426,6 +476,13 @@ def main() -> int:
                         dash.call("DELETE", f"/api/reports/{report_id}/", token=body["id_token"])
                     if report_ids:
                         print(f"  ✓ deleted {len(report_ids)} throwaway report(s)")
+                    for delivery_id in metrics_delivery_ids:
+                        dash.call("DELETE", f"/api/report-metrics/{delivery_id}/",
+                                  token=body["id_token"])
+                    if metrics_key_id:  # a no-op when the run already revoked it
+                        dash.call("DELETE", f"/api/report-metrics-keys/{metrics_key_id}/",
+                                  token=body["id_token"])
+                        print("  ✓ removed the throwaway metrics delivery and revoked its key")
             except Exception as e:  # noqa: BLE001
                 print(f"  ! could not restore the synthetic user's email: {e}")
         for pool, username, label in ((portal_pool, customer_email, "customer"),

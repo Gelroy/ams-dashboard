@@ -8,6 +8,7 @@ through portal/documents.py, never through these views.
 
 from django.db import transaction
 from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -16,12 +17,13 @@ from customers.models import Organization
 from customers.views import SoftDeleteDestroyMixin
 from portal.models import PortalAccount, PortalAccountStatus
 
-from . import notifications, pdf, services
+from . import ingest, notifications, pdf, services
 from .context import build_context, period_label
 from .defaults import TAG_REFERENCE
-from .models import MetricsDelivery, Report, ReportStatus, ReportTemplate
+from .models import MetricsDelivery, MetricsKey, Report, ReportStatus, ReportTemplate
 from .serializers import (
     MetricsDeliverySerializer,
+    MetricsKeySerializer,
     ReportDetailSerializer,
     ReportListSerializer,
     ReportTemplateSerializer,
@@ -157,6 +159,39 @@ class MetricsDeliveryViewSet(
             self.get_serializer(delivery).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+
+class MetricsKeyViewSet(
+    mixins.ListModelMixin,
+    mixins.CreateModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    """Delivery keys for the monitoring tool (see ingest.py). Admins create
+    and revoke them; the key itself is returned once, by create, and can
+    never be read again."""
+
+    queryset = MetricsKey.objects.all()
+    serializer_class = MetricsKeySerializer
+    pagination_class = None
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        raw, prefix, key_hash = ingest.new_key()
+        key = serializer.save(prefix=prefix, key_hash=key_hash, created_by_email=_actor(request))
+        return Response(
+            {**self.get_serializer(key).data, "key": raw}, status=status.HTTP_201_CREATED
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        """Revoke. The row stays so the list still shows who had access."""
+        key = self.get_object()
+        if key.revoked_at is None:
+            key.revoked_at = timezone.now()
+            key.revoked_by_email = _actor(request)
+            key.save(update_fields=["revoked_at", "revoked_by_email"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ReportViewSet(

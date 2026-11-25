@@ -403,3 +403,66 @@ def test_no_reports_bucket_without_the_portal(prod_template):
 def test_email_sender_requires_the_portal():
     with pytest.raises(ValueError, match="portal_email_from"):
         synth({"create_vpc": "true", "portal_email_from": "reports@ams.example.com"})
+
+
+def test_monthly_drafts_are_off_unless_a_day_is_set(dev_template):
+    assert "generate_reports" not in str(dev_template.find_resources("AWS::ECS::TaskDefinition"))
+
+
+def test_monthly_draft_schedule_runs_generate_reports_once_a_month():
+    template = synth({**DOMAIN_CONTEXT, "reports_schedule_day": "2"})
+    template.resource_count_is("AWS::Events::Rule", 1)
+    template.has_resource_properties(
+        "AWS::Events::Rule",
+        {
+            "ScheduleExpression": "cron(0 9 2 * ? *)",
+            "State": "ENABLED",
+            "Targets": [
+                assertions.Match.object_like(
+                    {
+                        "EcsParameters": assertions.Match.object_like(
+                            {
+                                "LaunchType": "FARGATE",
+                                "NetworkConfiguration": {
+                                    "AwsVpcConfiguration": assertions.Match.object_like(
+                                        {"AssignPublicIp": "ENABLED"}
+                                    )
+                                },
+                            }
+                        )
+                    }
+                )
+            ],
+        },
+    )
+    template.has_resource_properties(
+        "AWS::ECS::TaskDefinition",
+        {
+            "ContainerDefinitions": [
+                assertions.Match.object_like(
+                    {"Command": ["python", "manage.py", "generate_reports"]}
+                )
+            ]
+        },
+    )
+    # The scheduled task writes drafts to the database only: the report
+    # bucket stays reachable from the API task role alone.
+    scheduled = [
+        p["Properties"]
+        for p in template.find_resources("AWS::IAM::Policy").values()
+        if "ReportsGenerateDraftsTask" in str(p["Properties"]["Roles"])
+    ]
+    assert scheduled, "expected the scheduled task's own role policies"
+    assert "s3:" not in str(scheduled) and "ses:" not in str(scheduled)
+    assert "cognito-idp:" not in str(scheduled)
+
+
+@pytest.mark.parametrize("day", ["0", "29", "first", "-1"])
+def test_monthly_draft_schedule_rejects_days_that_some_months_lack(day):
+    with pytest.raises(ValueError, match="reports_schedule_day"):
+        synth({**DOMAIN_CONTEXT, "reports_schedule_day": day})
+
+
+def test_monthly_draft_schedule_requires_the_portal():
+    with pytest.raises(ValueError, match="reports_schedule_day"):
+        synth({"create_vpc": "true", "reports_schedule_day": "2"})

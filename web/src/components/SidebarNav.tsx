@@ -35,6 +35,7 @@ const sections: NavSection[] = [
     items: [
       { to: '/analytics', label: 'Analytics' },
       { to: '/report-templates', label: 'Report Templates' },
+      { to: '/metrics-delivery', label: 'Metrics Delivery' },
       { to: '/staff', label: 'Staff' },
       { to: '/settings', label: 'Settings' },
     ],

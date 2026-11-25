@@ -389,10 +389,11 @@ dashboard ┘                                                  │
 | Storage | `api/reports/storage.py` | S3 bucket `REPORTS_BUCKET` (private, encrypted, TLS-only, versioned); local disk when unset |
 | Email | `api/reports/notifications.py` | Link to the portal only — never the report. `PORTAL_EMAIL_MODE=log` (default) records recipients and sends nothing; `ses` sends from `PORTAL_EMAIL_FROM` |
 | Staff API | `api/reports/views.py` | `/api/reports/`, `/api/report-templates/`, `/api/report-metrics/`. Viewers read and preview; admins generate, edit, approve, delete |
+| Unattended delivery | `api/reports/ingest.py` | `POST /api/report-metrics/ingest` with a delivery key. See "Unattended metrics delivery" below |
 | Customer API | `api/portal/documents.py` | `/api/portal/documents` and `…/<id>/download`. Own organization, APPROVED only |
-| Staff screens | `web/src/pages/Report*.tsx` | **Reports** (month overview, upload metrics, generate drafts), report review (edit, preview, approve), **Report Templates** (editor with tag reference and live preview) |
+| Staff screens | `web/src/pages/Report*.tsx`, `MetricsDeliveryPage.tsx` | **Reports** (month overview, upload metrics, generate drafts), report review (edit, preview, approve), **Report Templates** (editor with tag reference and live preview), **Metrics Delivery** (delivery keys, what to send, customer ids) |
 | Customer screen | `portal/src/pages/DocumentsPage.tsx` | List, view, download |
-| Infra | `infra/infra/infra_stack.py` | `ReportsBucket`; API role may put and get objects there, nothing else; optional `portal_email_from` adds `ses:SendEmail` limited to that sender |
+| Infra | `infra/infra/infra_stack.py` | `ReportsBucket`; API role may put and get objects there, nothing else; optional `portal_email_from` adds `ses:SendEmail` limited to that sender; optional `reports_schedule_day` adds the monthly draft task |
 
 ### Tags
 
@@ -421,17 +422,20 @@ them and is the best worked example.
 
 ### Tests
 
-`cd api && .venv/bin/pytest` — 160 tests. The 54 in `reports/tests.py`
+`cd api && .venv/bin/pytest` — 177 tests. The 67 in `reports/tests.py`
 start with isolation: a customer sees only their own approved reports
 (by list and by guessed id), report content holds only that customer's
 data, and only that customer's flagged users are notified. Four guards
 were mutation-checked (approved-only filter, organization filter on
 installed software, organization filter on recipients, month filter on
-metrics): removing any one fails tests.
+metrics): removing any one fails tests. The delivery-key tests were
+checked the same way (revoked-key filter, future-month check, the key
+permission, soft-deleted customers).
 
 `infra/scripts/portal-smoke.py --env personal-dev` now also generates,
 approves, downloads and deletes throwaway reports (months 2020-01) for
-two customers against the live stack.
+two customers against the live stack, and creates, uses and revokes a
+delivery key.
 
 ### Running it in personal-dev
 
@@ -447,8 +451,62 @@ the latest month, to show the "not received" case). Then in the
 dashboard: **Reports → Generate missing drafts**.
 
 `manage.py generate_reports [--period YYYY-MM]` does the same from the
-command line and only creates what is missing, so it can go on a monthly
-schedule later.
+command line and only creates what is missing.
+
+### Unattended metrics delivery (2026-11-24)
+
+The monitoring server cannot sign in with Cognito, so it gets a
+**delivery key**: a long random secret (`amsm_…`) an admin creates on
+**Config → Metrics Delivery**. The key is shown once; only its SHA-256 is
+stored. One key per server, each revocable on its own.
+
+```
+curl --fail-with-body -X POST https://<dashboard host>/api/report-metrics/ingest \
+  -H "Authorization: Bearer $AMS_METRICS_KEY" \
+  -H "Content-Type: application/json" -d @metrics.json
+```
+
+```
+{"period": "2026-10",
+ "deliveries": [{"customer": "<jira org id>", "metrics": { … }}]}
+```
+
+- `customer` is the JIRA organization id (the screen lists them) or the
+  dashboard's own organization id. `metrics` is free-form, exactly what
+  templates read as `{metrics.…}`. `period` may also be set per delivery.
+- A delivery is an upsert per customer + month + source, the same row the
+  manual upload writes. Re-sending is always safe.
+- Each delivery is judged on its own. All accepted → 200. Any rejected →
+  **422**, with the accepted ones still stored, so a cron job notices a
+  customer the dashboard does not know. Malformed request → 400; over
+  5 MB → 413; future months are rejected.
+- **What a key can do: this one POST.** Every other endpoint only accepts
+  a staff or customer token, the key returns 401 there, and the ingest
+  path does not exist on the portal hostname. It reads nothing back and
+  cannot tell which customers exist.
+- Drafts already generated keep their figures; regenerate to pick up a
+  late delivery.
+
+Still unknown and deliberately not built: the Zabbix-side export script
+(it depends on which items and host groups make up a customer), and
+whether prod's internal ALB is reachable from the Zabbix server.
+
+### Monthly draft schedule (2026-11-24)
+
+`REPORTS_SCHEDULE_DAY=<1-28>` in an environment file adds one scheduled
+Fargate task, `generate_reports`, at 09:00 UTC on that day each month. It
+creates last month's missing drafts and nothing else: no approval, no
+email, no bucket access. `personal-dev` uses day 2. Set the Zabbix job to
+deliver on the 1st so the figures are there first; if they arrive late
+the draft shows "no monitoring data" and is regenerated by hand. Logs go
+to the API log group under the `ReportsGenerateDrafts` prefix.
+
+Both deployed to `personal-dev` and verified live 2026-11-24: migration
+`reports.0003` applied, live smoke 61/61 (nine new checks create a key,
+deliver with it, confirm it opens nothing else on either hostname, and
+revoke it), rule `cron(0 9 2 * ? *)` enabled, and the scheduled task
+definition run once by hand with a read-only command to prove its
+network path and database access. First real run: 2026-12-02.
 
 ### Looking at the staff screens locally
 
@@ -470,11 +528,9 @@ such bypass, on purpose.
 
 ### Open / not built yet
 
-- **How Zabbix delivers the metrics automatically.** Today: upload the
-  JSON per customer on the Reports screen, or `POST /api/report-metrics/`
-  as an admin. Unattended delivery needs a machine credential or an S3
-  drop folder plus a scheduled ingest — to decide once the Zabbix export
-  format and where it runs are known.
+- ~~How Zabbix delivers the metrics automatically.~~ Receiving side built
+  2026-11-24 (delivery keys + ingest endpoint, above). Remaining: the
+  export script on the Zabbix side.
 - **JIRA ticket summary.** The dashboard only holds open-ticket *counts*.
   A real summary needs ticket detail for the month (a JIRA query) and,
   as discussed, probably an AI step to condense it. `tickets.py` is where
@@ -482,8 +538,8 @@ such bypass, on purpose.
 - **Real email.** `log` mode everywhere so far. Turning on `ses` needs a
   verified SES identity (and production access, or SES only delivers to
   verified addresses).
-- **Monthly schedule** for `generate_reports` (EventBridge, like the JIRA
-  sync tasks).
+- ~~Monthly schedule for `generate_reports`.~~ Built 2026-11-24
+  (`REPORTS_SCHEDULE_DAY`, above).
 - **Withdrawing an approved report** other than by deleting it; a
   download audit trail; per-customer template choice.
 - The non-prod bucket is removed with the stack but must be emptied first.

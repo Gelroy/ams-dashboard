@@ -1,5 +1,5 @@
 /** Client for the monthly-report endpoints (/api/reports, /api/report-templates,
- *  /api/report-metrics). Months travel as "YYYY-MM". */
+ *  /api/report-metrics, /api/report-metrics-keys). Months travel as "YYYY-MM". */
 import { request, requestBlob } from './api'
 
 export interface ReportSection {
@@ -124,6 +124,27 @@ export const getReportPdf = (id: string) => requestBlob(`/reports/${id}/pdf/`)
 // ── Metrics ─────────────────────────────────────────────────────────
 export const deliverMetrics = (organization: string, period: string, payload: unknown) =>
   request<{ id: string }>('/report-metrics/', json('POST', { organization, period, payload }))
+
+// ── Delivery keys (unattended metrics delivery) ─────────────────────
+export interface MetricsKey {
+  id: string
+  name: string
+  prefix: string
+  created_by_email: string
+  created_at: string
+  last_used_at: string | null
+  revoked_at: string | null
+  revoked_by_email: string
+}
+
+export const listMetricsKeys = () => request<MetricsKey[]>('/report-metrics-keys/')
+
+/** The only response that ever contains the key itself. */
+export const createMetricsKey = (name: string) =>
+  request<MetricsKey & { key: string }>('/report-metrics-keys/', json('POST', { name }))
+
+export const revokeMetricsKey = (id: string) =>
+  request<void>(`/report-metrics-keys/${id}/`, json('DELETE'))
 
 // ── Templates ───────────────────────────────────────────────────────
 export const listTemplates = () => request<ReportTemplate[]>('/report-templates/')

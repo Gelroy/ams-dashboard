@@ -12,6 +12,8 @@ Isolation comes first (docs/CUSTOMER_PORTAL.md §4):
                         flagged for the AMS report are told.
   4. Roles              customers cannot reach the staff report API;
                         viewers cannot generate, edit or approve.
+  5. Delivery keys      the monitoring tool's key can deliver metrics
+                        and do nothing else (section 11 below).
 
 Then the workflow (draft → approved, frozen afterwards) and the tag
 language. Cognito, S3 and SES are never contacted.
@@ -36,12 +38,13 @@ from portal.tests import (  # noqa: F401 — fake_jwks and tenants are fixtures
     staff_token,
     tenants,
 )
-from reports import notifications, services, storage, templating
+from reports import ingest, notifications, services, storage, templating
 from reports.context import build_context
 from reports.defaults import DEFAULT_SECTIONS, TICKET_SUMMARY_PLACEHOLDER
 from reports.markup import parse_blocks, todo_marks
 from reports.models import (
     MetricsDelivery,
+    MetricsKey,
     NotificationStatus,
     Report,
     ReportNotification,
@@ -817,3 +820,191 @@ def test_s3_storage_round_trip_uses_the_configured_bucket(settings, monkeypatch)
     storage.put("reports/a/2026-10/x.pdf", b"%PDF-1.4 test")
     assert objects[("reports-bucket", "reports/a/2026-10/x.pdf")][1] == "application/pdf"
     assert storage.get("reports/a/2026-10/x.pdf") == b"%PDF-1.4 test"
+
+
+# ── 11. Unattended metrics delivery ────────────────────────────────────
+
+INGEST = "/api/report-metrics/ingest"
+
+
+def new_key(name="zabbix-prod") -> str:
+    made = staff().post("/api/report-metrics-keys/", {"name": name}, format="json")
+    assert made.status_code == 201, made.json()
+    return made.json()["key"]
+
+
+def machine(key: str):
+    return client(key)
+
+
+def test_a_key_is_shown_once_and_only_its_hash_is_kept(world):
+    made = staff().post("/api/report-metrics-keys/", {"name": " zabbix-prod "}, format="json")
+    assert made.status_code == 201
+    raw = made.json()["key"]
+    assert raw.startswith("amsm_") and len(raw) > 40
+    row = MetricsKey.objects.get()
+    assert row.name == "zabbix-prod" and row.created_by_email == "tech@imt.ca"
+    assert row.key_hash == ingest.hash_key(raw) and row.prefix == raw[: len(row.prefix)]
+    assert raw not in "".join(str(v) for v in vars(row).values())
+
+    listed = staff(admin=False).get("/api/report-metrics-keys/")
+    assert listed.status_code == 200
+    assert raw not in listed.content.decode() and row.key_hash not in listed.content.decode()
+    assert "key" not in listed.json()[0]
+    assert staff().get(f"/api/report-metrics-keys/{row.id}/").status_code == 405
+    blank = staff().post("/api/report-metrics-keys/", {"name": "  "}, format="json")
+    assert blank.status_code == 400
+
+
+def test_only_admins_create_and_revoke_keys(world):
+    raw = new_key()
+    row = MetricsKey.objects.get()
+    viewer = staff(admin=False)
+    assert viewer.post("/api/report-metrics-keys/", {"name": "x"}, format="json").status_code == 403
+    assert viewer.delete(f"/api/report-metrics-keys/{row.id}/").status_code == 403
+    assert customer(world["acct_a"]).get("/api/report-metrics-keys/").status_code == 401
+    body = {"customer": "synthetic-t1", "period": "2026-09", "metrics": {"a": 1}}
+    assert machine(raw).post(INGEST, body, format="json").status_code == 200
+
+    assert staff().delete(f"/api/report-metrics-keys/{row.id}/").status_code == 204
+    row.refresh_from_db()
+    assert row.revoked_at is not None and row.revoked_by_email == "tech@imt.ca"
+    assert machine(raw).post(INGEST, body, format="json").status_code == 401
+    # Revoked keys stay listed, for the record.
+    assert staff().get("/api/report-metrics-keys/").json()[0]["revoked_at"]
+
+
+def test_ingest_stores_a_month_per_customer_and_replaces_on_resend(world):
+    api = machine(new_key())
+    body = {
+        "period": "2026-09",
+        "deliveries": [
+            {"customer": "synthetic-t1", "metrics": {"availability": {"percent": 98.5}}},
+            {"customer": str(world["org_b"].id), "metrics": {"availability": {"percent": 97.0}}},
+        ],
+    }
+    first = api.post(INGEST, body, format="json")
+    assert first.status_code == 200, first.json()
+    assert first.json()["accepted"] == 2 and first.json()["rejected"] == 0
+    assert [r["status"] for r in first.json()["results"]] == ["created", "created"]
+
+    body["deliveries"][0]["metrics"] = {"availability": {"percent": 99.5}}
+    again = api.post(INGEST + "/", body, format="json")
+    assert [r["status"] for r in again.json()["results"]] == ["replaced", "replaced"]
+
+    a = MetricsDelivery.objects.get(organization=world["org_a"], period=SEP)
+    b = MetricsDelivery.objects.get(organization=world["org_b"], period=SEP)
+    assert a.payload == {"availability": {"percent": 99.5}}
+    assert b.payload == {"availability": {"percent": 97.0}}
+    assert a.delivered_by == "key:zabbix-prod" and a.source == "zabbix"
+    assert MetricsKey.objects.get().last_used_at is not None
+    # October, delivered by the fixture, is untouched; and it reaches the report.
+    assert MetricsDelivery.objects.filter(organization=world["org_a"]).count() == 2
+    assert build_context(world["org_a"], SEP)["metrics"]["availability"]["percent"] == 99.5
+    assert "bravo" not in str(build_context(world["org_a"], OCT)["metrics"])
+
+
+def test_one_bad_delivery_does_not_block_the_others_but_fails_the_request(world):
+    api = machine(new_key())
+    body = {
+        "period": "2026-09",
+        "deliveries": [
+            {"customer": "synthetic-t1", "metrics": {"a": 1}},
+            {"customer": "no-such-customer", "metrics": {"a": 1}},
+            {"customer": "00000000-0000-0000-0000-000000000000", "metrics": {"a": 1}},
+            {"customer": "synthetic-t2", "metrics": []},
+            {"customer": "synthetic-t2", "period": "2999-01", "metrics": {"a": 1}},
+            {"customer": "synthetic-t2", "period": "September", "metrics": {"a": 1}},
+            {"customer": "synthetic-t2", "source": "Not A Source!", "metrics": {"a": 1}},
+            "nonsense",
+        ],
+    }
+    r = api.post(INGEST, body, format="json")
+    assert r.status_code == 422
+    out = r.json()
+    assert out["accepted"] == 1 and out["rejected"] == 7
+    assert out["results"][0]["status"] == "created"
+    # A customer that does not exist answers the same way whatever was sent.
+    assert out["results"][1]["detail"] == out["results"][2]["detail"] == "Unknown customer."
+    assert all(x["status"] == "rejected" and x["detail"] for x in out["results"][1:])
+    assert MetricsDelivery.objects.filter(period=SEP).count() == 1
+
+
+def test_a_deleted_customer_cannot_receive_metrics(world):
+    api = machine(new_key())
+    world["org_b"].deleted_at = timezone.now()  # soft delete, as the dashboard does
+    world["org_b"].save(update_fields=["deleted_at"])
+    body = {"customer": "synthetic-t2", "period": "2026-09", "metrics": {"a": 1}}
+    r = api.post(INGEST, body, format="json")
+    assert r.status_code == 422 and r.json()["results"][0]["detail"] == "Unknown customer."
+
+
+@pytest.mark.parametrize(
+    "body",
+    [[], [{"customer": "synthetic-t1"}], {"deliveries": []}, {"deliveries": "x"}],
+)
+def test_ingest_rejects_malformed_requests(world, body):
+    assert machine(new_key()).post(INGEST, body, format="json").status_code == 400
+
+
+def test_ingest_limits_request_size(world, monkeypatch):
+    api = machine(new_key())
+    one = {"customer": "synthetic-t1", "metrics": {"a": 1}}
+    monkeypatch.setattr(ingest, "MAX_DELIVERIES", 2)
+    body = {"period": "2026-09", "deliveries": [one, one, one]}
+    assert api.post(INGEST, body, format="json").status_code == 400
+    monkeypatch.setattr(ingest, "MAX_METRICS_BYTES", 20)
+    big = {"customer": "synthetic-t1", "period": "2026-09", "metrics": {"a": "x" * 50}}
+    assert api.post(INGEST, big, format="json").status_code == 422
+    monkeypatch.setattr(ingest, "MAX_BODY_BYTES", 10)
+    assert api.post(INGEST, one, format="json").status_code == 413
+    assert not MetricsDelivery.objects.filter(period=SEP).exists()
+
+
+def test_ingest_accepts_nothing_but_a_live_delivery_key(world):
+    body = {"customer": "synthetic-t1", "period": "2026-09", "metrics": {"a": 1}}
+    callers = [
+        client(),
+        staff(),
+        customer(world["acct_a"]),
+        client("amsm_" + "x" * 43),
+        client("not-a-key"),
+    ]
+    for c in callers:
+        assert c.post(INGEST, body, format="json").status_code == 401
+    basic = client()
+    basic.credentials(HTTP_AUTHORIZATION="Basic " + new_key())
+    assert basic.post(INGEST, body, format="json").status_code == 401
+    assert not MetricsDelivery.objects.filter(period=SEP).exists()
+
+
+def test_a_delivery_key_opens_nothing_else(world):
+    report = approved(world["org_a"])
+    api = machine(new_key())
+    assert api.get(INGEST).status_code == 405
+    for path in [
+        "/api/reports/",
+        f"/api/reports/{report.id}/pdf/",
+        "/api/report-metrics/",
+        "/api/report-metrics-keys/",
+        "/api/report-templates/",
+        "/api/organizations/",
+        "/api/portal/documents",
+        f"/api/portal/documents/{report.id}/download",
+    ]:
+        assert api.get(path).status_code == 401, path
+    assert api.post("/api/report-metrics-keys/", {"name": "x"}, format="json").status_code == 401
+    assert api.post(f"/api/reports/{report.id}/notify/").status_code == 401
+
+
+def test_smoke_prune_removes_only_revoked_smoke_keys(world, capsys):
+    for name, revoked in [("smoke-key-ab12", True), ("smoke-key-cd34", False), ("zabbix", True)]:
+        MetricsKey.objects.create(
+            name=name,
+            prefix="amsm_x",
+            key_hash=ingest.hash_key(name),
+            revoked_at=timezone.now() if revoked else None,
+        )
+    call_command("portal_prune_smoke")
+    assert sorted(MetricsKey.objects.values_list("name", flat=True)) == ["smoke-key-cd34", "zabbix"]
+    assert "1 revoked smoke key" in capsys.readouterr().out

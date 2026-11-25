@@ -2,6 +2,7 @@
 
   ReportTemplate   editable section text with {tags}; one is the default
   MetricsDelivery  one month of monitoring metrics (JSON) for a customer
+  MetricsKey       machine credential that may deliver metrics, nothing else
   Report           a customer's report for a month: DRAFT → APPROVED
   ReportNotification  who was told about an approved report
 
@@ -74,6 +75,30 @@ class MetricsDelivery(models.Model):
                 name="report_metrics_org_period_source_unique",
             ),
         ]
+
+
+class MetricsKey(models.Model):
+    """A machine credential the monitoring tool uses to deliver metrics
+    (reports/ingest.py). Only a hash of the key is stored; the key itself
+    is shown once, when it is created. Revoked keys are kept for history."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.TextField()
+    #: First characters of the key, so staff can tell keys apart.
+    prefix = models.CharField(max_length=16)
+    key_hash = models.CharField(max_length=64, unique=True)
+    created_by_email = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_by_email = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "report_metrics_keys"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.prefix}…)"
 
 
 class ReportStatus(models.TextChoices):

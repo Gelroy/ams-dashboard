@@ -112,6 +112,13 @@ Optional context:
                               verified SES identity in this account.
                               Unset (default): nothing is sent — intended
                               recipients are only recorded.
+  - reports_schedule_day    : day of the month (1-28) on which a scheduled
+                              task creates last month's draft reports, at
+                              09:00 UTC. It only creates drafts that do not
+                              exist yet and never approves or emails
+                              anything. Unset (default): no schedule —
+                              drafts are generated from the Reports screen.
+                              Needs portal_enabled.
 
 With portal_enabled the stack also creates the reports bucket: private,
 encrypted, TLS-only, versioned. Approved report PDFs are stored there and
@@ -241,6 +248,18 @@ class AmsDashboardStack(cdk.Stack):
         portal_email_from = str(self.node.try_get_context("portal_email_from") or "").strip()
         if portal_email_from and not portal_enabled:
             raise ValueError("portal_email_from needs portal_enabled=true.")
+        reports_schedule_day_raw = str(
+            self.node.try_get_context("reports_schedule_day") or ""
+        ).strip()
+        reports_schedule_day = None
+        if reports_schedule_day_raw:
+            if not portal_enabled:
+                raise ValueError("reports_schedule_day needs portal_enabled=true.")
+            if not reports_schedule_day_raw.isdigit() or not (
+                1 <= int(reports_schedule_day_raw) <= 28
+            ):
+                raise ValueError("reports_schedule_day must be a day of the month from 1 to 28.")
+            reports_schedule_day = int(reports_schedule_day_raw)
         if api_desired_count < 0:
             raise ValueError("api_desired_count must be 0 or more.")
         extra_tags_raw = self.node.try_get_context("tags") or "{}"
@@ -851,7 +870,12 @@ class AmsDashboardStack(cdk.Stack):
             removal_policy=RemovalPolicy.RETAIN,
         )
 
-        def _scheduled_sync(name: str, mgmt_command: str, schedule: appscaling.Schedule):
+        def _scheduled_sync(
+            name: str,
+            mgmt_command: str,
+            schedule: appscaling.Schedule,
+            task_log_group: logs.ILogGroup = sync_log_group,
+        ):
             task_def = ecs.FargateTaskDefinition(
                 self, f"{name}Task", cpu=256, memory_limit_mib=512
             )
@@ -865,7 +889,7 @@ class AmsDashboardStack(cdk.Stack):
                 environment=common_env,
                 secrets=common_secrets,
                 logging=ecs.LogDriver.aws_logs(
-                    stream_prefix=name, log_group=sync_log_group
+                    stream_prefix=name, log_group=task_log_group
                 ),
             )
             scheduled = ecs_patterns.ScheduledFargateTask(
@@ -916,6 +940,22 @@ class AmsDashboardStack(cdk.Stack):
         # else: synthetic-data environment — no schedules, so nothing in this
         # account ever calls the real JIRA tenant. The sync commands still
         # exist in the image and can be run by hand if ever needed.
+
+        # ── Monthly draft reports ──────────────────────────────────────
+        # Early in the month, create last month's draft report for every
+        # contracted customer. The command only fills gaps, so a manual
+        # run and the schedule never collide; approving and emailing stay
+        # with staff. Needs no bucket access: PDFs are only stored on
+        # approval, by the API.
+        if reports_schedule_day is not None:
+            _scheduled_sync(
+                "ReportsGenerateDrafts",
+                "generate_reports",
+                appscaling.Schedule.cron(
+                    minute="0", hour="9", day=str(reports_schedule_day), month="*"
+                ),
+                task_log_group=log_group,
+            )
 
         # ── Outputs ────────────────────────────────────────────────────
         cdk.CfnOutput(self, "AlbDnsName", value=api_service.load_balancer.load_balancer_dns_name)

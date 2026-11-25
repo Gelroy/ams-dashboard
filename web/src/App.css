@@ -932,3 +932,35 @@
 .tag-paths li {
   margin-bottom: 4px;
 }
+
+/* ── Metrics delivery ────────────────────────────────────────────── */
+.key-reveal {
+  display: grid;
+  gap: 8px;
+}
+.key-value {
+  display: block;
+  padding: 8px 10px;
+  background: var(--color-bg-primary);
+  border: 0.5px solid #c8efde;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.code-sample {
+  margin: 0 0 0.75rem;
+  padding: 10px 12px;
+  background: var(--color-bg-secondary);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+.plain-list {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.7;
+}

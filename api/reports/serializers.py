@@ -4,7 +4,7 @@ from customers.models import Organization
 
 from . import services
 from .context import period_label
-from .models import MetricsDelivery, Report, ReportNotification, ReportTemplate
+from .models import MetricsDelivery, MetricsKey, Report, ReportNotification, ReportTemplate
 
 
 class PeriodField(serializers.Field):
@@ -75,6 +75,24 @@ class MetricsDeliverySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "The metrics must be a JSON object (name/value pairs at the top level)."
             )
+        return value
+
+
+class MetricsKeySerializer(serializers.ModelSerializer):
+    """Never exposes the key or its hash — only enough to recognise it."""
+
+    class Meta:
+        model = MetricsKey
+        fields = ["id", "name", "prefix", "created_by_email", "created_at", "last_used_at",
+                  "revoked_at", "revoked_by_email"]
+        read_only_fields = [f for f in fields if f != "name"]
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Give the key a name, e.g. the server that uses it.")
+        if len(value) > 80:
+            raise serializers.ValidationError("Keep the name under 80 characters.")
         return value
 
 
